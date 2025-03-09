@@ -7,14 +7,17 @@ from datetime import datetime
 from datetime import timedelta
 import os
 
+
 YOUTUBE_API_SERVICE_NAME = 'youtube'
 YOUTUBE_API_VERSION = 'v3'
 YOUTUBE_ANALYTICS_API_SERVICE_NAME = "youtubeAnalytics"
 YOUTUBE_ANALYTICS_API_VERSION = "v2"
 
+
 def get_youtube_client():
     """Создает и возвращает клиентский объект YouTube API."""
     return build(YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, developerKey=settings.youtube_api_key)
+
 
 def get_analytics_client():
     """
@@ -49,6 +52,8 @@ def get_analytics_client():
             token.write(credentials.to_json())
 
     return build(YOUTUBE_ANALYTICS_API_SERVICE_NAME, YOUTUBE_ANALYTICS_API_VERSION, credentials=credentials)
+
+
 async def get_recent_views(video_id: str, days: int = 7) -> Optional[int]:
     """
     Получает количество просмотров видео за последние `days` дней с помощью YouTube Analytics API.
@@ -91,3 +96,25 @@ async def get_recent_views(video_id: str, days: int = 7) -> Optional[int]:
     except Exception as e:
         print(f"Error in get_recent_views for video ID {video_id}: {e}")
         return None
+
+
+def get_total_videos_on_channel(channel_id: str) -> Optional[int]:
+    """
+    Получает общее количество видео на канале.
+    """
+    try:
+        youtube = get_youtube_client()
+        channel_response = youtube.channels().list(
+            part="statistics",
+            id=channel_id
+        ).execute()
+
+        if not channel_response["items"]:
+            return None
+        channel_stats = channel_response["items"][0]["statistics"]
+
+        return int(channel_stats['videoCount']) if 'videoCount' in channel_stats else 0
+
+    except Exception as e:
+      print(f"Error in get_total_videos_on_channel for {channel_id=}: {e}")
+      return None

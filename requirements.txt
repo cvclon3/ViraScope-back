@@ -4,3 +4,9 @@ python-dotenv
 google-api-python-client
 pydantic
 pydantic-settings
+google-auth-oauthlib
+sqlalchemy
+sqlmodel
+psycopg2-binary  # Если используете PostgreSQL
+passlib        # Для хеширования паролей
+python-jose[cryptography]  # Для JWT

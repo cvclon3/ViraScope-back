@@ -2,7 +2,7 @@ from googleapiclient.discovery import build
 from app.core.config import settings
 from google.oauth2.credentials import Credentials  # Добавляем импорт
 from google.auth.transport.requests import Request
-from typing import Optional
+from typing import Optional, Dict
 from datetime import datetime
 from datetime import timedelta
 import os
@@ -118,3 +118,41 @@ def get_total_videos_on_channel(channel_id: str) -> Optional[int]:
     except Exception as e:
       print(f"Error in get_total_videos_on_channel for {channel_id=}: {e}")
       return None
+
+
+#Добавляем метод get_channel_info
+async def get_channel_info(channel_id: str) -> Optional[Dict]:
+    """
+    Получает информацию о канале по его ID.
+
+    Args:
+        channel_id: ID канала.
+
+    Returns:
+        Словарь с информацией о канале или None, если произошла ошибка.
+    """
+    try:
+        youtube = get_youtube_client()
+        channel_response = youtube.channels().list(
+            part="snippet,statistics",  # Запрашиваем snippet и statistics
+            id=channel_id
+        ).execute()
+
+        if not channel_response["items"]:
+            return None  # Канал не найден
+
+        channel_data = channel_response["items"][0]
+        snippet = channel_data["snippet"]
+        statistics = channel_data["statistics"]
+
+        channel_info = {
+            'channel_title': snippet['title'],
+            'channel_thumbnail': snippet['thumbnails']['high']['url'],  # Можно выбрать другое разрешение
+            'channel_subscribers': int(statistics['subscriberCount']) if 'subscriberCount' in statistics else 0,
+            'channel_url': f'https://www.youtube.com/channel/{channel_id}',
+        }
+        return channel_info
+
+    except Exception as e:
+        print(f"Error in get_channel_info for channel ID {channel_id}: {e}")
+        return None

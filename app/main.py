@@ -1,6 +1,6 @@
 # app/main.py
 from fastapi import FastAPI
-from app.api import videos, users  # Импортируем users
+from app.api import videos, users, favorites  # Импортируем favorites
 from app.core.config import settings
 from app.core.database import init_db
 
@@ -8,7 +8,9 @@ app = FastAPI(title=settings.app_name)
 
 # Подключаем роутеры
 app.include_router(videos.router, prefix="/videos", tags=["videos"])
-app.include_router(users.router, prefix="", tags=["users"])  # Добавляем роутер users
+app.include_router(users.router, prefix="", tags=["users"])
+app.include_router(favorites.router, prefix="/favorites", tags=["favorites"])  # Добавляем роутер favorites
+
 
 # Создаем таблицы при старте приложения
 @app.on_event("startup")

@@ -1,7 +1,8 @@
 # app/models/user.py
-from typing import Optional
+
 import uuid
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field, SQLModel, Relationship
+from typing import List
 
 class User(SQLModel, table=True):
     id: uuid.UUID = Field(
@@ -12,6 +13,10 @@ class User(SQLModel, table=True):
     hashed_password: str = Field()
     is_active: bool = Field(default=True)
     is_superuser: bool = Field(default=False)
+
+    favorite_channels: List["FavoriteChannel"] = Relationship(back_populates="user")
     # Другие поля (first_name, last_name, etc.)
     class Config:
         orm_mode = True
+
+from .favorite import FavoriteChannel

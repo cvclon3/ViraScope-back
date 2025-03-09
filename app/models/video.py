@@ -16,8 +16,9 @@ class Video(BaseModel):
     likes_hidden: bool = Field(False, description="Скрыта ли статистика лайков")
     views_per_subscriber: Optional[float] = Field(None, description="Отношение просмотров к подписчикам")
     likes_per_view: Optional[float] = Field(None, description="Отношение лайков к просмотрам")
-    comments: Optional[int] = Field(None, description="Количество комментариев") # Добавляем
-    comments_per_view: Optional[float] = Field(None, description="Отношение комментариев к просмотрам") # Добавляем
+    comments: Optional[int] = Field(None, description="Количество комментариев")
+    comments_per_view: Optional[float] = Field(None, description="Отношение комментариев к просмотрам")
+    combined_metric: Optional[float] = Field(None, description="Комбинированная метрика") # Добавляем
 
     @validator("published_at", pre=True)
     def parse_published_at(cls, value):

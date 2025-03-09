@@ -1,7 +1,9 @@
+# app/api/videos.py
 from fastapi import APIRouter, Query, HTTPException
 from typing import List, Optional, Dict
 from app.core.youtube import get_youtube_client, get_recent_views
 from app.models.video import Video
+import math  # Добавляем импорт math
 
 router = APIRouter()
 
@@ -32,8 +34,25 @@ async def get_video_info(video_id: str) -> Optional[Dict]:
         likes_hidden = 'likeCount' not in statistics
         views = int(statistics['viewCount'])
         subscribers = int(channel_info['subscribers'])
-        comments = int(statistics['commentCount']) if 'commentCount' in statistics else 0 # Добавляем
+        comments = int(statistics['commentCount']) if 'commentCount' in statistics else 0
         comments_hidden = 'commentCount' not in statistics
+
+        # Рассчитываем отдельные метрики
+        vps = views / subscribers if subscribers > 0 else None
+        lpv = likes / views if views > 0 and not likes_hidden else None
+        cpv = comments / views if views > 0 and not comments_hidden else None
+
+        # Логарифмирование views_per_subscriber
+        vps_log = math.log(vps + 1) if vps is not None else 0  # +1, чтобы избежать log(0)
+
+        # "Экспертная" нормализация (с использованием vps_log)
+        vps_norm = min(vps_log / math.log(11), 1) if vps_log > 0 else 0   # Верхняя граница для log(vps+1)
+        lpv_norm = min(lpv / 0.1, 1) if lpv is not None else 0  # Верхняя граница - 0.1
+        cpv_norm = min(cpv / 0.01, 1) if cpv is not None else 0 # Верхняя граница - 0.01
+
+        # Взвешенное среднее нормализованных значений
+        w1, w2, w3 = 2, 1, 1  # Веса
+        combined_metric = (w1 * vps_norm + w2 * lpv_norm + w3 * cpv_norm) / (w1 + w2 + w3) * 100 if (vps_norm + lpv_norm+ cpv_norm) > 0 else None
 
         video_info = Video.parse_obj({
             'video_id': video_id,
@@ -46,10 +65,11 @@ async def get_video_info(video_id: str) -> Optional[Dict]:
             'channel_subscribers': subscribers,
             'likes': likes,
             'likes_hidden': likes_hidden,
-            'views_per_subscriber': views / subscribers if subscribers > 0 else None,
-            'likes_per_view': likes / views if views > 0 and not likes_hidden else None,
-            'comments': comments,  # Добавляем
-            'comments_per_view': comments / views if views > 0 and not comments_hidden else None, # Добавляем расчет
+            'views_per_subscriber': vps,
+            'likes_per_view': lpv,
+            'comments': comments,
+            'comments_per_view': cpv,
+            'combined_metric': combined_metric,
         })
 
         return video_info.dict()

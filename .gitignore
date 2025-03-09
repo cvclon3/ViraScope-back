@@ -5,6 +5,7 @@
 .env
 client_secrets.json
 token.json
+test.db
 
 ### macOS ###
 # General

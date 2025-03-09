@@ -1,12 +1,11 @@
 from fastapi import APIRouter, Query, HTTPException
-from typing import List, Optional, Dict, Annotated
+from typing import List, Optional, Dict
 from app.core.youtube import get_youtube_client, get_recent_views, get_total_videos_on_channel
 from app.models.video import Video
 import math
 import datetime
 import re
 from urllib.parse import quote_plus
-
 
 router = APIRouter()
 
@@ -33,8 +32,7 @@ async def get_video_info(video_id: str) -> Optional[Dict]:
         channel_info = await get_channel_info(channel_id)
         if not channel_info:
             return None
-        total_videos = get_total_videos_on_channel(channel_id) # Получаем кол-во видео
-
+        total_videos = get_total_videos_on_channel(channel_id)
 
         likes = int(statistics['likeCount']) if 'likeCount' in statistics else 0
         likes_hidden = 'likeCount' not in statistics
@@ -42,25 +40,15 @@ async def get_video_info(video_id: str) -> Optional[Dict]:
         subscribers = int(channel_info['subscribers'])
         comments = int(statistics['commentCount']) if 'commentCount' in statistics else 0
         comments_hidden = 'commentCount' not in statistics
-
-        # Длительность видео (в секундах)
         duration = parse_duration(content_details['duration'])
-
-        # Рассчитываем отдельные метрики
         vps = views / subscribers if subscribers > 0 else None
         lpv = likes / views if views > 0 and not likes_hidden else None
         cpv = comments / views if views > 0 and not comments_hidden else None
-
-        # Логарифмирование views_per_subscriber
         vps_log = math.log(vps + 1) if vps is not None else 0
-
-        # "Экспертная" нормализация
         vps_norm = min(vps_log / math.log(11), 1) if vps_log > 0 else 0
         lpv_norm = min(lpv / 0.1, 1) if lpv is not None else 0
         cpv_norm = min(cpv / 0.01, 1) if cpv is not None else 0
-
-        # Взвешенное среднее нормализованных значений
-        w1, w2, w3 = 2, 1, 1  # Веса
+        w1, w2, w3 = 2, 1, 1
         combined_metric = (w1 * vps_norm + w2 * lpv_norm + w3 * cpv_norm) / (w1 + w2 + w3) * 100 if (
                     vps_norm + lpv_norm + cpv_norm) > 0 else None
 
@@ -80,8 +68,9 @@ async def get_video_info(video_id: str) -> Optional[Dict]:
             'comments': comments,
             'comments_per_view': cpv,
             'combined_metric': combined_metric,
-            'duration': duration, # Добавляем
-            'total_videos': total_videos # Добавляем
+            'duration': duration,
+            'total_videos': total_videos,
+            'video_url': f'https://www.youtube.com/watch?v={video_id}',  # Добавляем URL
         })
 
         return video_info.dict()

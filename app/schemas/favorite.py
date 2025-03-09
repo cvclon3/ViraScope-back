@@ -1,9 +1,9 @@
 # app/schemas/favorite.py
 
-import uuid
 from pydantic import BaseModel, HttpUrl
 from datetime import datetime
 from typing import Optional
+import uuid
 
 class FavoriteChannelBase(BaseModel):
     channel_id: str
@@ -20,6 +20,7 @@ class FavoriteChannelCreate(FavoriteChannelBase):
 class FavoriteChannelRead(FavoriteChannelBase):
     id: int
     user_id: uuid.UUID
+    added_at: datetime #добавляем в схему
 
     class Config:
         from_attributes = True

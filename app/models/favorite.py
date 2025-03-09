@@ -3,7 +3,7 @@
 import uuid
 from sqlmodel import SQLModel, Field, Relationship, UniqueConstraint
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 class FavoriteChannel(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -15,6 +15,7 @@ class FavoriteChannel(SQLModel, table=True):
     channel_video_count: int
     channel_last_published_at: datetime
     channel_url: str
+    added_at: datetime = Field(default_factory=datetime.now)
 
     user: "User" = Relationship(back_populates="favorite_channels") #Связь с User
 

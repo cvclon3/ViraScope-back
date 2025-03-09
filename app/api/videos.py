@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query, HTTPException
 from typing import List, Optional, Dict
-from app.core.youtube import get_youtube_client, get_recent_views  # get_recent_views пока не используем
+from app.core.youtube import get_youtube_client, get_recent_views
 from app.models.video import Video
 
 router = APIRouter()
@@ -27,24 +27,29 @@ async def get_video_info(video_id: str) -> Optional[Dict]:
         channel_info = await get_channel_info(channel_id)
         if not channel_info:
             return None
-        # Явное преобразование в int перед использованием
+
+        likes = int(statistics['likeCount']) if 'likeCount' in statistics else 0
+        likes_hidden = 'likeCount' not in statistics
         views = int(statistics['viewCount'])
-        subscribers = int(channel_info['subscribers'])  #Уже преобразовывали, но лучше перестраховаться
-        likes = int(statistics['likeCount']) if 'likeCount' in statistics else 0 #Также добавляем значение по умолчанию
+        subscribers = int(channel_info['subscribers'])
+        comments = int(statistics['commentCount']) if 'commentCount' in statistics else 0 # Добавляем
+        comments_hidden = 'commentCount' not in statistics
 
         video_info = Video.parse_obj({
             'video_id': video_id,
             'title': snippet['title'],
             'thumbnail': snippet['thumbnails']['high']['url'],
             'published_at': snippet['publishedAt'],
-            'views': views, # Используем преобразованные значения
+            'views': views,
             'channel_title': snippet['channelTitle'],
             'channel_url': f'https://www.youtube.com/channel/{channel_id}',
-            'channel_subscribers': subscribers, # Используем преобразованные значения
+            'channel_subscribers': subscribers,
             'likes': likes,
-            'views_per_subscriber':  views / subscribers if subscribers > 0 else None,  # Используем переменные
-            'likes_per_view': likes / views if views > 0 else None,  # Используем переменные
-
+            'likes_hidden': likes_hidden,
+            'views_per_subscriber': views / subscribers if subscribers > 0 else None,
+            'likes_per_view': likes / views if views > 0 and not likes_hidden else None,
+            'comments': comments,  # Добавляем
+            'comments_per_view': comments / views if views > 0 and not comments_hidden else None, # Добавляем расчет
         })
 
         return video_info.dict()

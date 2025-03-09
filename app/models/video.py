@@ -1,3 +1,4 @@
+# app/models/video.py
 from pydantic import BaseModel, HttpUrl, validator, Field
 from datetime import datetime
 from typing import Optional
@@ -11,9 +12,12 @@ class Video(BaseModel):
     channel_title: str
     channel_url: HttpUrl
     channel_subscribers: int
-    likes: Optional[int] = Field(None, description="Количество лайков")  # Добавляем
+    likes: Optional[int] = Field(None, description="Количество лайков")
+    likes_hidden: bool = Field(False, description="Скрыта ли статистика лайков")
     views_per_subscriber: Optional[float] = Field(None, description="Отношение просмотров к подписчикам")
     likes_per_view: Optional[float] = Field(None, description="Отношение лайков к просмотрам")
+    comments: Optional[int] = Field(None, description="Количество комментариев") # Добавляем
+    comments_per_view: Optional[float] = Field(None, description="Отношение комментариев к просмотрам") # Добавляем
 
     @validator("published_at", pre=True)
     def parse_published_at(cls, value):

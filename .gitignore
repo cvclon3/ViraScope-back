@@ -3,6 +3,8 @@
 
 ### dotenv ###
 .env
+client_secrets.json
+token.json
 
 ### macOS ###
 # General

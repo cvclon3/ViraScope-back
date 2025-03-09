@@ -1,8 +1,7 @@
 from fastapi import APIRouter, Query, HTTPException
 from typing import List, Optional, Dict
-from app.core.youtube import get_youtube_client
+from app.core.youtube import get_youtube_client, get_recent_views  # get_recent_views пока не используем
 from app.models.video import Video
-
 
 router = APIRouter()
 
@@ -28,17 +27,26 @@ async def get_video_info(video_id: str) -> Optional[Dict]:
         channel_info = await get_channel_info(channel_id)
         if not channel_info:
             return None
-        # Используем Video.parse_obj вместо явного создания словаря
+        # Явное преобразование в int перед использованием
+        views = int(statistics['viewCount'])
+        subscribers = int(channel_info['subscribers'])  #Уже преобразовывали, но лучше перестраховаться
+        likes = int(statistics['likeCount']) if 'likeCount' in statistics else 0 #Также добавляем значение по умолчанию
+
         video_info = Video.parse_obj({
             'video_id': video_id,
             'title': snippet['title'],
             'thumbnail': snippet['thumbnails']['high']['url'],
             'published_at': snippet['publishedAt'],
-            'views': int(statistics['viewCount']),
+            'views': views, # Используем преобразованные значения
             'channel_title': snippet['channelTitle'],
             'channel_url': f'https://www.youtube.com/channel/{channel_id}',
-            'channel_subscribers': channel_info['subscribers'],
+            'channel_subscribers': subscribers, # Используем преобразованные значения
+            'likes': likes,
+            'views_per_subscriber':  views / subscribers if subscribers > 0 else None,  # Используем переменные
+            'likes_per_view': likes / views if views > 0 else None,  # Используем переменные
+
         })
+
         return video_info.dict()
 
     except Exception as e:
@@ -66,6 +74,7 @@ async def get_channel_info(channel_id: str) -> Optional[Dict]:
     except Exception as e:
         print(f"Error in get_channel_info for {channel_id=}: {e}")
         return None
+
 @router.get("/", response_model=List[Video])
 async def get_videos_by_title(
     query: str = Query(..., description="Поисковый запрос (название видео)"),
@@ -88,7 +97,7 @@ async def get_videos_by_title(
             video_id = search_result['id']['videoId']
             video_info = await get_video_info(video_id)
             if video_info:
-              videos.append(video_info)
+                videos.append(video_info)
 
         return videos
 

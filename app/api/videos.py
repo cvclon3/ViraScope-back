@@ -1,6 +1,8 @@
+# app/api/videos.py
 from fastapi import APIRouter, Query, HTTPException
 from typing import List, Optional, Dict
-from app.core.youtube import get_youtube_client, get_recent_views, get_total_videos_on_channel
+from app.core.youtube import (get_youtube_client, get_recent_views,
+                              get_total_videos_on_channel, get_channel_views, parse_duration)  # Добавляем get_channel_views
 from app.models.video import Video
 import math
 import datetime
@@ -29,28 +31,23 @@ async def get_video_info(video_id: str) -> Optional[Dict]:
         content_details = video_data['contentDetails']
 
         channel_id = snippet['channelId']
-        channel_info = await get_channel_info(channel_id)
+        channel_info = await get_channel_info(channel_id)  # Получаем информацию о канале
         if not channel_info:
             return None
-        total_videos = get_total_videos_on_channel(channel_id)
+        total_videos = get_total_videos_on_channel(channel_id) # Количество видео
+        all_channel_views = await get_channel_views(channel_id) #Всего просмотров
 
         likes = int(statistics['likeCount']) if 'likeCount' in statistics else 0
         likes_hidden = 'likeCount' not in statistics
         views = int(statistics['viewCount'])
         subscribers = int(channel_info['subscribers'])
         comments = int(statistics['commentCount']) if 'commentCount' in statistics else 0
-        comments_hidden = 'commentCount' not in statistics
+        comments_hidden = 'commentCount' not in statistics  # не используется
         duration = parse_duration(content_details['duration'])
-        vps = views / subscribers if subscribers > 0 else None
-        lpv = likes / views if views > 0 and not likes_hidden else None
-        cpv = comments / views if views > 0 and not comments_hidden else None
-        vps_log = math.log(vps + 1) if vps is not None else 0
-        vps_norm = min(vps_log / math.log(11), 1) if vps_log > 0 else 0
-        lpv_norm = min(lpv / 0.1, 1) if lpv is not None else 0
-        cpv_norm = min(cpv / 0.01, 1) if cpv is not None else 0
-        w1, w2, w3 = 2, 1, 1
-        combined_metric = (w1 * vps_norm + w2 * lpv_norm + w3 * cpv_norm) / (w1 + w2 + w3) * 100 if (
-                    vps_norm + lpv_norm + cpv_norm) > 0 else None
+
+        # --- Расчет новой метрики ---
+        average_channel_views_per_video = all_channel_views / total_videos if total_videos and total_videos > 0 else None #Избегаем деления на ноль
+        combined_metric = views / average_channel_views_per_video if average_channel_views_per_video is not None and average_channel_views_per_video > 0 else None
 
         video_info = Video.parse_obj({
             'video_id': video_id,
@@ -63,14 +60,14 @@ async def get_video_info(video_id: str) -> Optional[Dict]:
             'channel_subscribers': subscribers,
             'likes': likes,
             'likes_hidden': likes_hidden,
-            'views_per_subscriber': vps,
-            'likes_per_view': lpv,
+            'views_per_subscriber': None,  # Удаляем старые метрики
+            'likes_per_view': None,       # Удаляем
             'comments': comments,
-            'comments_per_view': cpv,
-            'combined_metric': combined_metric,
+            'comments_per_view': None,     # Удаляем
+            'combined_metric': combined_metric,  # Новая метрика
             'duration': duration,
             'total_videos': total_videos,
-            'video_url': f'https://www.youtube.com/watch?v={video_id}',  # Добавляем URL
+            'video_url': f'https://www.youtube.com/watch?v={video_id}',
         })
 
         return video_info.dict()
@@ -96,6 +93,26 @@ async def get_channel_info(channel_id: str) -> Optional[Dict]:
         }
     except Exception as e:
         print(f"Error in get_channel_info for {channel_id=}: {e}")
+        return None
+
+async def get_channel_views(channel_id: str) -> Optional[int]:
+    """
+    Получает суммарное количество просмотров на канале.
+    """
+    try:
+        youtube = get_youtube_client()
+        channel_response = youtube.channels().list(
+            part="statistics",
+            id=channel_id
+        ).execute()
+
+        if not channel_response["items"]:
+            return None
+        channel_stats = channel_response["items"][0]["statistics"]
+        return int(channel_stats['viewCount']) if 'viewCount' in channel_stats else 0 #Всего просмотров
+
+    except Exception as e:
+        print(f"Error in get_channel_views for channel ID {channel_id}: {e}")
         return None
 
 def parse_duration(duration_str: str) -> int:

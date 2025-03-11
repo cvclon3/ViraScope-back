@@ -13,11 +13,11 @@ class UserCreate(UserBase):
 class UserRead(UserBase):
     id: uuid.UUID
     is_active: bool
-    is_superuser: bool
+    is_superuser: bool  # Добавляем
     class Config:
-      from_attributes = True
+        from_attributes = True
 
-class UserUpdate(BaseModel):  # Для обновления данных пользователя
+class UserUpdate(BaseModel):  # Наследуемся от BaseModel
     username: Optional[str] = Field(None, min_length=3, max_length=50)
     email: Optional[EmailStr] = None
-    password: Optional[str] = Field(None, min_length=8) #пароль тоже можно менять
+    password: Optional[str] = Field(None, min_length=8)

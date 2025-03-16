@@ -24,3 +24,12 @@ class Item(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+class SearchResponse(BaseModel):
+    item_count: int = Field(description="Количество видео/шортсов")
+    type: str = Field(description="Видео/шортсы")
+    items: list[Item]
+
+    class Config:
+        orm_mode = True

@@ -103,15 +103,26 @@ async def search_videos(
         encoded_query = quote_plus(query)
         youtube = get_youtube_client()
 
-        search_response = youtube.search().list(
+        search_response_medium = youtube.search().list(
             q=encoded_query,
             part='snippet',
             type='video',
-            maxResults=50,  # Запрашиваем с запасом, но не больше 50
+            videoDuration='medium',
+            maxResults=25,
         ).execute()
 
-        video_ids = [item["id"]["videoId"] for item in search_response["items"]]
-        channel_ids = [item["snippet"]["channelId"] for item in search_response["items"]]
+        search_response_long = youtube.search().list(
+            q=encoded_query,
+            part='snippet',
+            type='video',
+            videoDuration='long',
+            maxResults=25,
+        ).execute()
+
+        search_response = search_response_medium['items'] + search_response_long['items']
+
+        video_ids = [item["id"]["videoId"] for item in search_response]
+        channel_ids = [item["snippet"]["channelId"] for item in search_response]
 
         video_response = youtube.videos().list(
             part="snippet,contentDetails,statistics",
@@ -128,20 +139,18 @@ async def search_videos(
         sorted_channel = sort_json_by_key_values(channel_response['items'], channel_ids, 'id')
 
         await save_json_to_file({
-            'search': search_response,
+            'search_medium': search_response_medium,
+            'search_long': search_response_long,
             'videos': sorted_video,
             'channels': sorted_channel,
         })
 
         videos_result = []
         for i in range(max_results):
-            if is_shorts(sorted_video[i]):
-                continue
-
             channel_ = find_object_with_next(sorted_channel, 'id', sorted_video[i]['snippet']['channelId'])
 
             search_item = build_search_item_obj(
-                search_response['items'][i],
+                search_response[i],
                 sorted_video[i],
                 channel_,
             )

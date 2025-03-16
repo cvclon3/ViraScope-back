@@ -1,9 +1,10 @@
-# app/models/video.py
-from pydantic import BaseModel, HttpUrl, validator, Field
+# app/models/search_models.py
+from pydantic import BaseModel, HttpUrl, Field
 from datetime import datetime
 from typing import Optional
 
-class Video(BaseModel):
+
+class Item(BaseModel):
     video_id: str
     title: str
     thumbnail: HttpUrl
@@ -15,17 +16,20 @@ class Video(BaseModel):
     likes: Optional[int] = Field(None, description="Количество лайков")
     likes_hidden: bool = Field(False, description="Скрыта ли статистика лайков")
     comments: Optional[int] = Field(None, description="Количество комментариев")
+    comments_hidden: bool = Field(False, description="Скрыта ли статистика лайков")
     combined_metric: Optional[float] = Field(None, description="Комбинированная метрика")
     duration: int = Field(..., description="Длительность видео в секундах")
-    total_videos: Optional[int] = Field(None, description="Общее количество видео на канале")
     video_url: HttpUrl = Field(..., description="Ссылка на видео")
+    channel_thumbnail: HttpUrl
+
+    class Config:
+        orm_mode = True
 
 
-    @validator("published_at", pre=True)
-    def parse_published_at(cls, value):
-        if isinstance(value, str):
-            return datetime.fromisoformat(value.replace('Z', '+00:00'))
-        return value
+class SearchResponse(BaseModel):
+    item_count: int = Field(description="Количество видео/шортсов")
+    type: str = Field(description="Видео/шортсы")
+    items: list[Item]
 
     class Config:
         orm_mode = True

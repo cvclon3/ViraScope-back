@@ -6,6 +6,7 @@ from typing import Optional, Dict
 from datetime import datetime
 from datetime import timedelta
 import os
+import re
 
 
 YOUTUBE_API_SERVICE_NAME = 'youtube'
@@ -156,3 +157,42 @@ async def get_channel_info(channel_id: str) -> Optional[Dict]:
     except Exception as e:
         print(f"Error in get_channel_info for channel ID {channel_id}: {e}")
         return None
+
+
+async def get_channel_views(channel_id: str) -> Optional[int]:
+    """
+    Получает суммарное количество просмотров на канале.
+    """
+    try:
+        youtube = get_youtube_client()
+        channel_response = youtube.channels().list(
+            part="statistics",
+            id=channel_id
+        ).execute()
+
+        if not channel_response["items"]:
+            return None
+        channel_stats = channel_response["items"][0]["statistics"]
+        return int(channel_stats['viewCount']) if 'viewCount' in channel_stats else 0 #Всего просмотров
+
+    except Exception as e:
+        print(f"Error in get_channel_views for channel ID {channel_id}: {e}")
+        return None
+
+
+def parse_duration(duration_str: str) -> int:
+    """
+    Преобразует строку длительности видео в формате ISO 8601 в секунды.
+    Взято из https://stackoverflow.com/questions/39825838/how-to-parse-youtube-video-duration-from-youtube-data-api-response
+    """
+    pattern = r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?'
+    match = re.match(pattern, duration_str)
+
+    if not match:
+        return 0
+
+    hours = int(match.group(1)) if match.group(1) else 0
+    minutes = int(match.group(2)) if match.group(2) else 0
+    seconds = int(match.group(3)) if match.group(3) else 0
+
+    return hours * 3600 + minutes * 60 + seconds

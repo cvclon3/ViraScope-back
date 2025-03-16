@@ -6,6 +6,7 @@ from typing import Optional, Dict
 from datetime import datetime
 from datetime import timedelta
 import os
+import re
 
 
 YOUTUBE_API_SERVICE_NAME = 'youtube'

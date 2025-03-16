@@ -1,12 +1,14 @@
-fastapi
-uvicorn[standard]
-python-dotenv
+fastapi~=0.115.7
+uvicorn[standard]~=0.34.0
+python-dotenv~=0.21.0
 google-api-python-client
-pydantic
+pydantic~=2.8.2
 pydantic-settings
 google-auth-oauthlib
-sqlalchemy
-sqlmodel
+sqlalchemy~=2.0.34
+sqlmodel~=0.0.22
 psycopg2-binary  # Если используете PostgreSQL
-passlib        # Для хеширования паролей
+passlib~=1.7.4
 python-jose[cryptography]  # Для JWT
+aiofiles~=24.1.0
+alembic~=1.13.3

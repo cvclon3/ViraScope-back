@@ -1,7 +1,7 @@
 # app/api/users.py
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Cookie, requests
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlmodel import Session
 
@@ -13,10 +13,15 @@ from app.models.token import Token
 from app.models.user import User
 from app.schemas.user import UserCreate, UserRead, UserUpdate
 
+from authlib.integrations.starlette_client import OAuth
+from datetime import datetime, timedelta
+from fastapi.responses import JSONResponse, RedirectResponse
+
 router = APIRouter()
 
 # Схема OAuth2 для формы входа
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")  #  tokenUrl="token"
+
 
 # Функция для получения текущего пользователя (зависимость)
 async def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)) -> User:
@@ -92,3 +97,80 @@ async def update_user_me(user_update: UserUpdate, current_user: User = Depends(g
     db.commit()
     db.refresh(current_user)
     return current_user
+
+oauth = OAuth()
+oauth.register(
+    name="auth_demo",
+    client_id=settings.google_client_id,
+    client_secret=settings.google_client_secret,
+    authorize_url="https://accounts.google.com/o/oauth2/auth",
+    authorize_params=None,
+    access_token_url="https://accounts.google.com/o/oauth2/token",
+    access_token_params=None,
+    refresh_token_url=None,
+    authorize_state=settings.secret_key,
+    redirect_uri="http://127.0.0.1:8000/auth",
+    jwks_uri="https://www.googleapis.com/oauth2/v3/certs",
+    client_kwargs={"scope": "openid profile email"},
+)
+
+@router.get("/login")
+async def login(request: Request):
+    request.session.clear()
+    referer = request.headers.get("referer")
+    frontend_url = settings.frontend_url
+    redirect_url = settings.redirect_url
+    request.session["login_redirect"] = frontend_url
+    return await oauth.auth_demo.authorize_redirect(
+        request, redirect_url, prompt="consent"
+    )
+
+@router.route("/auth")
+async def auth(request: Request):
+    try:
+        token = await oauth.auth_demo.authorize_access_token(request)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="Google authentication failed.")
+
+    try:
+        user_info_endpoint = "https://www.googleapis.com/oauth2/v2/userinfo"
+        headers = {"Authorization": f'Bearer {token["access_token"]}'}
+        google_response = requests.get(user_info_endpoint, headers=headers)
+        user_info = google_response.json()
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="Google authentication failed.")
+
+    user = token.get("userinfo")
+
+    iss = user.get("iss")
+    if iss not in ["https://accounts.google.com", "accounts.google.com"]:
+        raise HTTPException(status_code=401, detail="Google authentication failed.")
+
+    user_id = user.get("sub")
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Google authentication failed.")
+
+    expires_in = token.get("expires_in")
+
+    user_email = user.get("email")
+    user_name = user_info.get("name")
+    user_pic = user_info.get("picture")
+
+
+    # Create JWT token
+    access_token_expires = timedelta(seconds=expires_in)
+    access_token = create_access_token(data={"sub": user_name}, expires_delta=access_token_expires)
+
+    # TODO: Добавить данные в бдшку
+
+    redirect_url = request.session.pop("login_redirect", "")
+    response = RedirectResponse(redirect_url)
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        secure=True,  # Ensure you're using HTTPS
+        samesite="strict",  # Set the SameSite attribute to None
+    )
+
+    return response

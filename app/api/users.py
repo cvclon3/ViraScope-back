@@ -1,9 +1,9 @@
 # app/api/users.py
 from datetime import timedelta
-
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Cookie, requests
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Cookie
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlmodel import Session
+import requests # замени на асинхрон
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -109,7 +109,7 @@ oauth.register(
     access_token_params=None,
     refresh_token_url=None,
     authorize_state=settings.secret_key,
-    redirect_uri="http://127.0.0.1:8000/auth",
+    redirect_uri="http://localhost:8000/auth",
     jwks_uri="https://www.googleapis.com/oauth2/v3/certs",
     client_kwargs={"scope": "openid profile email"},
 )
@@ -130,7 +130,7 @@ async def auth(request: Request):
     try:
         token = await oauth.auth_demo.authorize_access_token(request)
     except Exception as e:
-        raise HTTPException(status_code=401, detail="Google authentication failed.")
+        raise HTTPException(status_code=401, detail="1 Google authentication failed.")
 
     try:
         user_info_endpoint = "https://www.googleapis.com/oauth2/v2/userinfo"
@@ -138,17 +138,18 @@ async def auth(request: Request):
         google_response = requests.get(user_info_endpoint, headers=headers)
         user_info = google_response.json()
     except Exception as e:
-        raise HTTPException(status_code=401, detail="Google authentication failed.")
+        print(e)
+        raise HTTPException(status_code=401, detail=f"2 Google authentication failed.{e}")
 
     user = token.get("userinfo")
 
     iss = user.get("iss")
     if iss not in ["https://accounts.google.com", "accounts.google.com"]:
-        raise HTTPException(status_code=401, detail="Google authentication failed.")
+        raise HTTPException(status_code=401, detail="3 Google authentication failed.")
 
     user_id = user.get("sub")
     if user_id is None:
-        raise HTTPException(status_code=401, detail="Google authentication failed.")
+        raise HTTPException(status_code=401, detail="4 Google authentication failed.")
 
     expires_in = token.get("expires_in")
 

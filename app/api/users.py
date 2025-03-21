@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request, Cookie
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlmodel import Session
 import requests # замени на асинхрон
+import uuid
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -31,6 +32,8 @@ async def get_current_user(db: Session = Depends(get_db), token: str = Depends(o
         headers={"WWW-Authenticate": "Bearer"},
     )
     payload = decode_access_token(token)  #  Используем функцию
+    print('FFFFFF')
+    print(payload)
     if payload is None:
         raise credentials_exception
 
@@ -125,8 +128,8 @@ async def login(request: Request):
         request, redirect_url, prompt="consent"
     )
 
-@router.route("/auth")
-async def auth(request: Request):
+@router.get("/auth")
+async def auth(request: Request, session: Session = Depends(get_db)):
     try:
         token = await oauth.auth_demo.authorize_access_token(request)
     except Exception as e:
@@ -160,9 +163,15 @@ async def auth(request: Request):
 
     # Create JWT token
     access_token_expires = timedelta(seconds=expires_in)
-    access_token = create_access_token(data={"sub": user_name}, expires_delta=access_token_expires)
+    access_token = create_access_token(data={"sub": str(user_email).split('@')[0]}, expires_delta=access_token_expires)
 
     # TODO: Добавить данные в бдшку
+    user_ = session.query(User).filter(User.email == user_email).first()
+    if not user_:
+        user_ = User(email=user_email, username=str(user_email).split('@')[0], hashed_password=get_password_hash(str(uuid.uuid4())))
+        session.add(user_)
+        session.commit()
+        session.refresh(user_)
 
     redirect_url = request.session.pop("login_redirect", "")
     response = RedirectResponse(redirect_url)

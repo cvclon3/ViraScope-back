@@ -3,14 +3,14 @@ import traceback
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Cookie
-from sqlmodel import Session
+from sqlmodel import select
 import requests # замени на асинхрон
 import uuid
 
 from starlette.responses import JSONResponse
 
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import get_db, SessionDep
 from app.core.security import get_password_hash
 from app.models.user import User
 
@@ -47,7 +47,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.algorithm)
 
 
-def get_current_user(access_token: str = Cookie(None), session: Session = Depends(get_db)):
+def get_current_user(request: Request, session: SessionDep) -> Optional[User]:
+    access_token = request.cookies["access_token"]
+
     if not access_token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
@@ -57,8 +59,13 @@ def get_current_user(access_token: str = Cookie(None), session: Session = Depend
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
+        # print('fff')
+        # print(access_token)
+        # print('fff')
         payload = jwt.decode(access_token, settings.jwt_secret_key, algorithms=[settings.algorithm])
-
+        print('fff')
+        print(payload)
+        print('fff')
         user_id: str = payload.get("sub")
         user_email: str = payload.get("email")
 
@@ -67,6 +74,8 @@ def get_current_user(access_token: str = Cookie(None), session: Session = Depend
 
         # Мб по id?
         user = session.query(User).filter(User.email == user_email).first()
+        # statement = select(User).where(User.email == user_email)
+        # user = session.exec(statement).first()
         if user is None:
             raise credentials_exception
         return user
@@ -101,7 +110,7 @@ async def login(request: Request):
 
 
 @router.get("/auth")
-async def auth(request: Request, session: Session = Depends(get_db)):
+async def auth(request: Request, session: SessionDep):
     try:
         token = await oauth.auth_demo.authorize_access_token(request)
     except Exception as e:

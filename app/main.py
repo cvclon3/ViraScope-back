@@ -3,6 +3,8 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.params import Cookie
 from fastapi import Depends
+from app.core.database import SessionDep
+from app.models.user import User
 
 from app.api import videos, auth, favorites, search  # Импортируем favorites
 from app.api.auth import get_current_user
@@ -46,9 +48,9 @@ async def redoc_html():
 
 
 @app.get("/users/me")
-async def read_user(request: Request):
-    token = request.cookies["access_token"]
-    user = get_current_user(token)
+async def read_user(current_user: User = Depends(get_current_user)):
+    # user = get_current_user(request, session)
+    user = current_user
     return {"message": f"Hello {user.username}"}
 
 app.add_middleware(

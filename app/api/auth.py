@@ -7,6 +7,8 @@ from sqlmodel import Session
 import requests # замени на асинхрон
 import uuid
 
+from starlette.responses import JSONResponse
+
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import get_password_hash
@@ -45,8 +47,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.algorithm)
 
 
-def get_current_user(token: str = Cookie(None), session: Session = Depends(get_db)):
-    if not token:
+def get_current_user(access_token: str = Cookie(None), session: Session = Depends(get_db)):
+    if not access_token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     credentials_exception = HTTPException(
@@ -55,7 +57,7 @@ def get_current_user(token: str = Cookie(None), session: Session = Depends(get_d
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.algorithm])
+        payload = jwt.decode(access_token, settings.jwt_secret_key, algorithms=[settings.algorithm])
 
         user_id: str = payload.get("sub")
         user_email: str = payload.get("email")
@@ -100,18 +102,18 @@ async def login(request: Request):
 
 @router.get("/auth")
 async def auth(request: Request, session: Session = Depends(get_db)):
-    # try:
-    token = await oauth.auth_demo.authorize_access_token(request)
-    # except Exception as e:
-    #     raise HTTPException(status_code=401, detail="Google authentication failed.")
+    try:
+        token = await oauth.auth_demo.authorize_access_token(request)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="Google authentication failed.")
 
-    # try:
-    user_info_endpoint = "https://www.googleapis.com/oauth2/v2/userinfo"
-    headers = {"Authorization": f'Bearer {token["access_token"]}'}
-    google_response = requests.get(user_info_endpoint, headers=headers)
-    user_info = google_response.json()
-    # except Exception as e:
-    #     raise HTTPException(status_code=401, detail="Google authentication failed.")
+    try:
+        user_info_endpoint = "https://www.googleapis.com/oauth2/v2/userinfo"
+        headers = {"Authorization": f'Bearer {token["access_token"]}'}
+        google_response = requests.get(user_info_endpoint, headers=headers)
+        user_info = google_response.json()
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="Google authentication failed.")
 
     user = token.get("userinfo")
 
@@ -146,7 +148,15 @@ async def auth(request: Request, session: Session = Depends(get_db)):
         value=access_token,
         httponly=True,
         secure=False,  # Ensure you're using HTTPS
-        samesite="strict",  # Set the SameSite attribute to None
+        samesite="lax",  # Set the SameSite attribute to None
     )
 
+    return response
+
+
+@router.get("/logout")
+async def logout(request: Request):
+    request.session.clear()
+    response = JSONResponse(content={"message": "Logged out successfully."})
+    response.delete_cookie("access_token")
     return response

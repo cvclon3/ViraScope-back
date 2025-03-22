@@ -1,8 +1,11 @@
 # app/main.py
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.params import Cookie
+from fastapi import Depends
 
 from app.api import videos, auth, favorites, search  # Импортируем favorites
+from app.api.auth import get_current_user
 from app.core.config import settings
 from app.core.database import init_db
 from starlette.middleware.sessions import SessionMiddleware
@@ -42,14 +45,16 @@ async def redoc_html():
     )
 
 
-@app.get("/users/{username}")
-async def read_user(username: str):
-    return {"message": f"Hello {username}"}
+@app.get("/users/me")
+async def read_user(request: Request):
+    token = request.cookies["access_token"]
+    user = get_current_user(token)
+    return {"message": f"Hello {user.username}"}
 
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key,  # Replace with a secure secret key
-    session_cookie="session_cookie_name"  # Optional: Customize the cookie name
+    session_cookie="session_cookie"
 )
 
 app.add_middleware(

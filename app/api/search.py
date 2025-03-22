@@ -49,6 +49,7 @@ def build_search_item_obj(search_r, video_r, channel_r, item_type='video'):
             'channel_title': channel_r['snippet']['title'],
             'channel_url': f'https://www.youtube.com/channel/{channel_r['id']}',
             'channel_subscribers': int(channel_r['statistics']['subscriberCount']),
+            'video_count': int(channel_r['statistics']['videoCount']),
             'likes': likes,
             'likes_hidden': likes_hidden,
             'comments': comments,

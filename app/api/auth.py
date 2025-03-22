@@ -21,7 +21,7 @@ router = APIRouter()
 
 oauth = OAuth()
 oauth.register(
-    name="ViraScope",
+    name="auth_demo",
     client_id=settings.google_client_id,
     client_secret=settings.google_client_secret,
     authorize_url="https://accounts.google.com/o/oauth2/auth",
@@ -100,18 +100,18 @@ async def login(request: Request):
 
 @router.get("/auth")
 async def auth(request: Request, session: Session = Depends(get_db)):
-    try:
-        token = await oauth.auth_demo.authorize_access_token(request)
-    except Exception as e:
-        raise HTTPException(status_code=401, detail="Google authentication failed.")
+    # try:
+    token = await oauth.auth_demo.authorize_access_token(request)
+    # except Exception as e:
+    #     raise HTTPException(status_code=401, detail="Google authentication failed.")
 
-    try:
-        user_info_endpoint = "https://www.googleapis.com/oauth2/v2/userinfo"
-        headers = {"Authorization": f'Bearer {token["access_token"]}'}
-        google_response = requests.get(user_info_endpoint, headers=headers)
-        user_info = google_response.json()
-    except Exception as e:
-        raise HTTPException(status_code=401, detail="Google authentication failed.")
+    # try:
+    user_info_endpoint = "https://www.googleapis.com/oauth2/v2/userinfo"
+    headers = {"Authorization": f'Bearer {token["access_token"]}'}
+    google_response = requests.get(user_info_endpoint, headers=headers)
+    user_info = google_response.json()
+    # except Exception as e:
+    #     raise HTTPException(status_code=401, detail="Google authentication failed.")
 
     user = token.get("userinfo")
 
@@ -145,7 +145,7 @@ async def auth(request: Request, session: Session = Depends(get_db)):
         key="access_token",
         value=access_token,
         httponly=True,
-        secure=True,  # Ensure you're using HTTPS
+        secure=False,  # Ensure you're using HTTPS
         samesite="strict",  # Set the SameSite attribute to None
     )
 

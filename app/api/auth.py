@@ -48,9 +48,9 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
 
 
 def get_current_user(request: Request, session: SessionDep) -> Optional[User]:
-    access_token = request.cookies["access_token"]
-
-    if not access_token:
+    try:
+        access_token = request.cookies["access_token"]
+    except KeyError:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
     credentials_exception = HTTPException(

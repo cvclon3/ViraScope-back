@@ -49,9 +49,7 @@ async def redoc_html():
 
 @app.get("/users/me")
 async def read_user(current_user: User = Depends(get_current_user)):
-    # user = get_current_user(request, session)
-    user = current_user
-    return {"message": f"Hello {user.username}"}
+    return {"message": f"Hello {current_user.username}"}
 
 app.add_middleware(
     SessionMiddleware,

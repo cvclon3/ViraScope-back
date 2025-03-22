@@ -2,9 +2,9 @@
 import traceback
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Cookie
 from sqlmodel import select
-import requests # замени на асинхрон
 import uuid
 
 from starlette.responses import JSONResponse
@@ -59,13 +59,7 @@ def get_current_user(request: Request, session: SessionDep) -> Optional[User]:
         headers={"WWW-Authenticate": "Bearer"},
     )
     try:
-        # print('fff')
-        # print(access_token)
-        # print('fff')
         payload = jwt.decode(access_token, settings.jwt_secret_key, algorithms=[settings.algorithm])
-        print('fff')
-        print(payload)
-        print('fff')
         user_id: str = payload.get("sub")
         user_email: str = payload.get("email")
 
@@ -74,8 +68,6 @@ def get_current_user(request: Request, session: SessionDep) -> Optional[User]:
 
         # Мб по id?
         user = session.query(User).filter(User.email == user_email).first()
-        # statement = select(User).where(User.email == user_email)
-        # user = session.exec(statement).first()
         if user is None:
             raise credentials_exception
         return user
@@ -119,7 +111,7 @@ async def auth(request: Request, session: SessionDep):
     try:
         user_info_endpoint = "https://www.googleapis.com/oauth2/v2/userinfo"
         headers = {"Authorization": f'Bearer {token["access_token"]}'}
-        google_response = requests.get(user_info_endpoint, headers=headers)
+        google_response = httpx.get(user_info_endpoint, headers=headers)
         user_info = google_response.json()
     except Exception as e:
         raise HTTPException(status_code=401, detail="Google authentication failed.")

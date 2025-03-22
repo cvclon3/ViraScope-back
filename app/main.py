@@ -1,6 +1,6 @@
 # app/main.py
 from fastapi import FastAPI
-from app.api import videos, users, favorites, search  # Импортируем favorites
+from app.api import videos, users, favorites, search, apis_for_ai  # Импортируем favorites
 from app.core.config import settings
 from app.core.database import init_db
 
@@ -11,6 +11,7 @@ app = FastAPI(title=settings.app_name)
 app.include_router(users.router, prefix="", tags=["users"])
 app.include_router(favorites.router, prefix="/favorites", tags=["favorites"])
 app.include_router(search.router, prefix="/search", tags=["search"])
+app.include_router(apis_for_ai.router, prefix="/forai", tags=["for ai"])
 
 
 # Создаем таблицы при старте приложения

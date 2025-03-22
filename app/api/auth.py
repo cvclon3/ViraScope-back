@@ -1,25 +1,20 @@
 # app/api/auth.py
 import traceback
-from datetime import timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Cookie
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlmodel import Session
 import requests # замени на асинхрон
 import uuid
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.security import (get_password_hash,
-                                verify_password, decode_access_token)  #  Импортируем decode_access_token
-from app.models.token import Token
+from app.core.security import get_password_hash
 from app.models.user import User
-from app.schemas.user import UserCreate, UserRead, UserUpdate
 
 from authlib.integrations.starlette_client import OAuth
 from datetime import datetime, timedelta
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import RedirectResponse
 from jose import JWTError, jwt, ExpiredSignatureError
 
 router = APIRouter()
@@ -50,7 +45,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return jwt.encode(to_encode, settings.jwt_secret_key, algorithm=settings.algorithm)
 
 
-def get_current_user(token: str = Cookie(None)):
+def get_current_user(token: str = Cookie(None), session: Session = Depends(get_db)):
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
@@ -68,7 +63,11 @@ def get_current_user(token: str = Cookie(None)):
         if user_id is None or user_email is None:
             raise credentials_exception
 
-        return {"user_id": user_id, "user_email": user_email}
+        # Мб по id?
+        user = session.query(User).filter(User.email == user_email).first()
+        if user is None:
+            raise credentials_exception
+        return user
 
     except ExpiredSignatureError:
         # Specifically handle expired tokens
@@ -135,58 +134,10 @@ async def auth(request: Request, session: Session = Depends(get_db)):
     if not user_:
         user_ = User(email=user_email, username=str(user_email).split('@')[0],
                      hashed_password=get_password_hash(str(uuid.uuid4())))
+        # Надо ли пароль?
         session.add(user_)
         session.commit()
         session.refresh(user_)
-
-    redirect_url = request.session.pop("login_redirect", "")
-    response = RedirectResponse(redirect_url)
-    response.set_cookie(
-        key="access_token",
-        value=access_token,
-        httponly=True,
-        secure=True,  # Ensure you're using HTTPS
-        samesite="strict",  # Set the SameSite attribute to None
-    )
-
-    return response
-
-@router.get("/auth")
-async def auth(request: Request, session: Session = Depends(get_db)):
-    try:
-        token = await oauth.auth_demo.authorize_access_token(request)
-    except Exception as e:
-        raise HTTPException(status_code=401, detail="1 Google authentication failed.")
-
-    try:
-        user_info_endpoint = "https://www.googleapis.com/oauth2/v2/userinfo"
-        headers = {"Authorization": f'Bearer {token["access_token"]}'}
-        google_response = requests.get(user_info_endpoint, headers=headers)
-        user_info = google_response.json()
-    except Exception as e:
-        print(e)
-        raise HTTPException(status_code=401, detail=f"2 Google authentication failed.{e}")
-
-    user = token.get("userinfo")
-
-    iss = user.get("iss")
-    if iss not in ["https://accounts.google.com", "accounts.google.com"]:
-        raise HTTPException(status_code=401, detail="3 Google authentication failed.")
-
-    user_id = user.get("sub")
-    if user_id is None:
-        raise HTTPException(status_code=401, detail="4 Google authentication failed.")
-
-    expires_in = token.get("expires_in")
-
-    user_email = user.get("email")
-    user_name = user_info.get("name")
-    user_pic = user_info.get("picture")
-
-
-    # Create JWT token
-    access_token_expires = timedelta(seconds=expires_in)
-    access_token = create_access_token(data={"sub": str(user_email).split('@')[0]}, expires_delta=access_token_expires)
 
     redirect_url = request.session.pop("login_redirect", "")
     response = RedirectResponse(redirect_url)

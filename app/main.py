@@ -67,7 +67,6 @@ app.add_middleware(
 )
 
 # Подключаем роутеры
-app.include_router(videos.router, prefix="/videos", tags=["videos"])
 app.include_router(auth.router, prefix="", tags=["auth"])
 app.include_router(favorites.router, prefix="/favorites", tags=["favorites"])
 app.include_router(search.router, prefix="/search", tags=["search"])

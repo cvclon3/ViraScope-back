@@ -2,7 +2,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import videos, users, favorites, search  # Импортируем favorites
+from app.api import videos, auth, favorites, search  # Импортируем favorites
 from app.core.config import settings
 from app.core.database import init_db
 from starlette.middleware.sessions import SessionMiddleware
@@ -21,11 +21,12 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],  # Allow all methods (GET, POST, etc.)
     allow_headers=["*"],  # Allow all headers
+    expose_headers=["*"],  # Expose all headers
 )
 
 # Подключаем роутеры
 app.include_router(videos.router, prefix="/videos", tags=["videos"])
-app.include_router(users.router, prefix="", tags=["users"])
+app.include_router(auth.router, prefix="", tags=["auth"])
 app.include_router(favorites.router, prefix="/favorites", tags=["favorites"])
 app.include_router(search.router, prefix="/search", tags=["search"])
 

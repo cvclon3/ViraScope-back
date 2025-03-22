@@ -7,7 +7,7 @@ from app.core.database import init_db
 app = FastAPI(title=settings.app_name)
 
 # Подключаем роутеры
-app.include_router(videos.router, prefix="/videos", tags=["videos"])
+# app.include_router(videos.router, prefix="/videos", tags=["videos"])
 app.include_router(users.router, prefix="", tags=["users"])
 app.include_router(favorites.router, prefix="/favorites", tags=["favorites"])
 app.include_router(search.router, prefix="/search", tags=["search"])

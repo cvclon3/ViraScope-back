@@ -75,6 +75,14 @@ def is_shorts(video_r):
     return "#shorts" in title.lower() or "#shorts" in description.lower() or duration <= 3*60
 
 
+def is_shorts_v(video_r):
+    # Проверяем наличие #Shorts в названии или описании
+    title = video_r["snippet"]["title"]
+    description = video_r["snippet"]["description"]
+    duration = parse_duration(video_r['contentDetails']['duration'])
+    return "#shorts" in title.lower() or "#shorts" in description.lower() or duration <= 60
+
+
 async def save_json_to_file(data):
     # Преобразуем словарь в JSON-строку
     json_data = json.dumps(data, indent=4)
@@ -98,6 +106,79 @@ def find_object_with_next(data, key, value):
     return next((obj for obj in data if obj.get(key) == value), None)
 
 
+async def get_videos(response, encoded_query, max_results, date_published, youtube, videos_result, page_token=None):
+    if page_token is None:
+        search_response = youtube.search().list(
+            q=encoded_query,
+            part='snippet',
+            type='video',
+            pageToken=page_token,
+            publishedAfter=date_published,
+            maxResults=50,
+        ).execute()
+    else:
+        search_response = youtube.search().list(
+            q=encoded_query,
+            part='snippet',
+            type='video',
+            publishedAfter=date_published,
+            maxResults=50,
+        ).execute()
+
+    total_results = search_response['pageInfo']['totalResults']
+    search_response = search_response['items']
+
+    if len(search_response) == 0:
+        response.status_code = status.HTTP_406_NOT_ACCEPTABLE
+        return SearchResponse.model_validate({
+            'item_count': 0,
+            'type': 'video',
+            'items': [],
+        }).model_dump()
+
+    video_ids = [item["id"]["videoId"] for item in search_response]
+    channel_ids = [item["snippet"]["channelId"] for item in search_response]
+
+    video_response = youtube.videos().list(
+        part="snippet,contentDetails,statistics",
+        id=','.join(video_ids),
+    ).execute()
+
+    sorted_video = sort_json_by_key_values(video_response['items'], video_ids, 'id')
+
+    channel_response = youtube.channels().list(
+        part="snippet,contentDetails,statistics",
+        id=','.join(channel_ids),
+    ).execute()
+
+    sorted_channel = sort_json_by_key_values(channel_response['items'], channel_ids, 'id')
+
+    await save_json_to_file({
+        'search_video': search_response,
+        'videos': sorted_video,
+        'channels': sorted_channel,
+    })
+
+    for i in range(min(max_results, len(search_response))):
+        if is_shorts_v(sorted_video[i]):
+            continue
+
+        channel_ = find_object_with_next(sorted_channel, 'id', sorted_video[i]['snippet']['channelId'])
+
+        search_item = build_search_item_obj(
+            search_response[i],
+            sorted_video[i],
+            channel_,
+        )
+
+        # if (search_response['items'][i]['id']['videoId'] != sorted_video[i]['id']) or (search_response['items'][i]['snippet']['channelId'] != channel_['id']):
+        #     print('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF')
+
+        videos_result.append(search_item)
+
+    return videos_result, page_token, total_results
+
+
 @router.get("/videos", response_model=SearchResponse)
 async def search_videos(
     response: Response,
@@ -115,77 +196,100 @@ async def search_videos(
 
         encoded_query = quote(query, safe="-|")
         youtube = get_youtube_client()
-
-        search_response_medium = youtube.search().list(
-            q=encoded_query,
-            part='snippet',
-            type='video',
-            videoDuration='medium',
-            maxResults=25,
-        ).execute()
-
-        search_response_long = youtube.search().list(
-            q=encoded_query,
-            part='snippet',
-            type='video',
-            videoDuration='long',
-            maxResults=25,
-        ).execute()
-
-        search_response = search_response_medium['items'] + search_response_long['items']
-
-        if len(search_response) == 0:
-            response.status_code = status.HTTP_406_NOT_ACCEPTABLE
-            return SearchResponse.model_validate({
-                'item_count': 0,
-                'type': 'video',
-                'items': [],
-            }).model_dump()
-
-
-        video_ids = [item["id"]["videoId"] for item in search_response]
-        channel_ids = [item["snippet"]["channelId"] for item in search_response]
-
-        video_response = youtube.videos().list(
-            part="snippet,contentDetails,statistics",
-            id=','.join(video_ids),
-        ).execute()
-
-        sorted_video = sort_json_by_key_values(video_response['items'], video_ids, 'id')
-
-        channel_response = youtube.channels().list(
-            part="snippet,contentDetails,statistics",
-            id=','.join(channel_ids),
-        ).execute()
-
-        sorted_channel = sort_json_by_key_values(channel_response['items'], channel_ids, 'id')
-
-        await save_json_to_file({
-            'search_medium': search_response_medium,
-            'search_long': search_response_long,
-            'videos': sorted_video,
-            'channels': sorted_channel,
-        })
-
         videos_result = []
-        for i in range(min(max_results, len(search_response))):
-            channel_ = find_object_with_next(sorted_channel, 'id', sorted_video[i]['snippet']['channelId'])
 
-            search_item = build_search_item_obj(
-                search_response[i],
-                sorted_video[i],
-                channel_,
+        videos_result, next_page_token, total_results = await get_videos(
+            response=response,
+            encoded_query=encoded_query,
+            max_results=max_results,
+            date_published=get_rfc3339_date(date_published),
+            youtube=youtube,
+            videos_result=videos_result,
+            page_token=None
+        )
+
+        print(total_results)
+
+        if len(videos_result) < max_results and total_results > 50:
+            videos_result, _, total_results = await get_videos(
+                response=response,
+                encoded_query=encoded_query,
+                max_results=max_results,
+                date_published=get_rfc3339_date(date_published),
+                youtube=youtube,
+                videos_result=videos_result,
+                page_token=next_page_token
             )
 
-            # if (search_response['items'][i]['id']['videoId'] != sorted_video[i]['id']) or (search_response['items'][i]['snippet']['channelId'] != channel_['id']):
-            #     print('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF')
-
-            videos_result.append(search_item)
+        # search_response_medium = youtube.search().list(
+        #     q=encoded_query,
+        #     part='snippet',
+        #     type='video',
+        #     videoDuration='medium',
+        #     maxResults=25,
+        # ).execute()
+        #
+        # search_response_long = youtube.search().list(
+        #     q=encoded_query,
+        #     part='snippet',
+        #     type='video',
+        #     videoDuration='long',
+        #     maxResults=25,
+        # ).execute()
+        #
+        # search_response = search_response_medium['items'] + search_response_long['items']
+        #
+        # if len(search_response) == 0:
+        #     response.status_code = status.HTTP_406_NOT_ACCEPTABLE
+        #     return SearchResponse.model_validate({
+        #         'item_count': 0,
+        #         'type': 'video',
+        #         'items': [],
+        #     }).model_dump()
+        #
+        #
+        # video_ids = [item["id"]["videoId"] for item in search_response]
+        # channel_ids = [item["snippet"]["channelId"] for item in search_response]
+        #
+        # video_response = youtube.videos().list(
+        #     part="snippet,contentDetails,statistics",
+        #     id=','.join(video_ids),
+        # ).execute()
+        #
+        # sorted_video = sort_json_by_key_values(video_response['items'], video_ids, 'id')
+        #
+        # channel_response = youtube.channels().list(
+        #     part="snippet,contentDetails,statistics",
+        #     id=','.join(channel_ids),
+        # ).execute()
+        #
+        # sorted_channel = sort_json_by_key_values(channel_response['items'], channel_ids, 'id')
+        #
+        # await save_json_to_file({
+        #     'search_medium': search_response_medium,
+        #     'search_long': search_response_long,
+        #     'videos': sorted_video,
+        #     'channels': sorted_channel,
+        # })
+        #
+        # for i in range(min(max_results, len(search_response))):
+        #     channel_ = find_object_with_next(sorted_channel, 'id', sorted_video[i]['snippet']['channelId'])
+        #
+        #     search_item = build_search_item_obj(
+        #         search_response[i],
+        #         sorted_video[i],
+        #         channel_,
+        #     )
+        #
+        #     # if (search_response['items'][i]['id']['videoId'] != sorted_video[i]['id']) or (search_response['items'][i]['snippet']['channelId'] != channel_['id']):
+        #     #     print('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF')
+        #
+        #     videos_result.append(search_item)
 
         return SearchResponse.model_validate({
-            'item_count': min(max_results, len(search_response)),
+            'item_count': min(max_results, len(videos_result)),
             'type': 'videos',
-            'items': videos_result[:min(max_results, len(search_response))],
+            'items': videos_result[:min(max_results, len(videos_result))],
         }).model_dump()
 
     except Exception as e:
@@ -272,9 +376,9 @@ async def search_shorts(
             shorts_result.append(search_item)
 
         return SearchResponse.model_validate({
-            'item_count': min(max_results, len(search_response)),
+            'item_count': min(max_results, len(shorts_result)),
             'type': 'shorts',
-            'items': shorts_result[:min(max_results, len(search_response))],
+            'items': shorts_result[:min(max_results, len(shorts_result))],
         }).model_dump()
 
     except Exception as e:

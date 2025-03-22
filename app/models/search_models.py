@@ -13,6 +13,7 @@ class Item(BaseModel):
     channel_title: str
     channel_url: HttpUrl
     channel_subscribers: int
+    video_count: int
     likes: Optional[int] = Field(None, description="Количество лайков")
     likes_hidden: bool = Field(False, description="Скрыта ли статистика лайков")
     comments: Optional[int] = Field(None, description="Количество комментариев")

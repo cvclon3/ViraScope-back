@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query, HTTPException, Response, status
 from app.models.search_models import Item, SearchResponse
-from app.core.youtube import get_youtube_client, parse_duration
+from app.core.youtube import get_youtube_client, parse_duration, get_rfc3339_date
 from urllib.parse import quote
 import json
 import uuid
@@ -102,11 +102,16 @@ async def search_videos(
     response: Response,
     query: str = Query(..., description="Поисковый запрос (название видео)"),
     max_results: int = Query(50, description="Количество видео в ответе", ge=1, le=50),
+    date_published: str = Query('all_time', description="Дата публикации \
+    (all_time, last_week, last_month, last_3_month, last_6_month, last_year")
 ):
     """
     Эндпоинт для поиска видео с фильтрацией.
     """
     try:
+        if date_published not in ('all_time', 'last_week', 'last_month', 'last_3_month', 'last_6_month', 'last_year'):
+            raise HTTPException(status_code=status.HTTP_406_NOT_ACCEPTABLE, detail='date_published value error')
+
         encoded_query = quote(query, safe="-|")
         youtube = get_youtube_client()
 
@@ -177,9 +182,9 @@ async def search_videos(
             videos_result.append(search_item)
 
         return SearchResponse.model_validate({
-            'item_count': len(videos_result),
+            'item_count': min(max_results, len(search_response)),
             'type': 'videos',
-            'items': videos_result,
+            'items': videos_result[:min(max_results, len(search_response))],
         }).model_dump()
 
     except Exception as e:
@@ -191,79 +196,85 @@ async def search_shorts(
     response: Response,
     query: str = Query(..., description="Поисковый запрос (название шортсов)"),
     max_results: int = Query(50, description="Количество видео в ответе", ge=1, le=50),
+    date_published: str = Query('all_time', description="Дата публикации \
+    (all_time, last_week, last_month, last_3_month, last_6_month, last_year)")
 ):
     """
     Эндпоинт для поиска видео с фильтрацией.
     """
-    # try:
-    encoded_query = quote(query, safe="-|")
-    youtube = get_youtube_client()
+    try:
+        if date_published not in ('all_time', 'last_week', 'last_month', 'last_3_month', 'last_6_month', 'last_year'):
+            raise HTTPException(status_code=status.HTTP_406_NOT_ACCEPTABLE, detail='date_published value error')
 
-    search_response_short = youtube.search().list(
-        q=encoded_query,
-        part='snippet',
-        type='video',
-        videoDuration='short',
-        maxResults=50,
-    ).execute()
+        encoded_query = quote(query, safe="-|")
+        youtube = get_youtube_client()
 
-    search_response = search_response_short['items']
+        search_response_short = youtube.search().list(
+            q=encoded_query,
+            part='snippet',
+            type='video',
+            videoDuration='short',
+            publishedAfter=get_rfc3339_date(date_published),
+            maxResults=50,
+        ).execute()
 
-    if len(search_response) == 0:
-        response.status_code = status.HTTP_406_NOT_ACCEPTABLE
+        search_response = search_response_short['items']
+
+        if len(search_response) == 0:
+            response.status_code = status.HTTP_406_NOT_ACCEPTABLE
+            return SearchResponse.model_validate({
+                'item_count': 0,
+                'type': 'shorts',
+                'items': [],
+            }).model_dump()
+
+        video_ids = [item["id"]["videoId"] for item in search_response]
+        channel_ids = [item["snippet"]["channelId"] for item in search_response]
+
+        video_response = youtube.videos().list(
+            part="snippet,contentDetails,statistics",
+            id=','.join(video_ids),
+        ).execute()
+
+        sorted_video = sort_json_by_key_values(video_response['items'], video_ids, 'id')
+
+        channel_response = youtube.channels().list(
+            part="snippet,contentDetails,statistics",
+            id=','.join(channel_ids),
+        ).execute()
+
+        sorted_channel = sort_json_by_key_values(channel_response['items'], channel_ids, 'id')
+
+        await save_json_to_file({
+            'search_short': search_response_short,
+            'videos': sorted_video,
+            'channels': sorted_channel,
+        })
+
+        shorts_result = []
+        for i in range(min(max_results, len(search_response))):
+            if not is_shorts(sorted_video[i]):
+                continue
+
+            channel_ = find_object_with_next(sorted_channel, 'id', sorted_video[i]['snippet']['channelId'])
+
+            search_item = build_search_item_obj(
+                search_response[i],
+                sorted_video[i],
+                channel_,
+                item_type='shorts',
+            )
+
+            # if (search_response['items'][i]['id']['videoId'] != sorted_video[i]['id']) or (search_response['items'][i]['snippet']['channelId'] != channel_['id']):
+            #     print('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF')
+
+            shorts_result.append(search_item)
+
         return SearchResponse.model_validate({
-            'item_count': 0,
-            'type': 'video',
-            'items': [],
+            'item_count': min(max_results, len(search_response)),
+            'type': 'shorts',
+            'items': shorts_result[:min(max_results, len(search_response))],
         }).model_dump()
 
-    video_ids = [item["id"]["videoId"] for item in search_response]
-    channel_ids = [item["snippet"]["channelId"] for item in search_response]
-
-    video_response = youtube.videos().list(
-        part="snippet,contentDetails,statistics",
-        id=','.join(video_ids),
-    ).execute()
-
-    sorted_video = sort_json_by_key_values(video_response['items'], video_ids, 'id')
-
-    channel_response = youtube.channels().list(
-        part="snippet,contentDetails,statistics",
-        id=','.join(channel_ids),
-    ).execute()
-
-    sorted_channel = sort_json_by_key_values(channel_response['items'], channel_ids, 'id')
-
-    await save_json_to_file({
-        'search_short': search_response_short,
-        'videos': sorted_video,
-        'channels': sorted_channel,
-    })
-
-    shorts_result = []
-    for i in range(min(max_results, len(search_response))):
-        if not is_shorts(sorted_video[i]):
-            continue
-
-        channel_ = find_object_with_next(sorted_channel, 'id', sorted_video[i]['snippet']['channelId'])
-
-        search_item = build_search_item_obj(
-            search_response[i],
-            sorted_video[i],
-            channel_,
-            item_type='shorts',
-        )
-
-        # if (search_response['items'][i]['id']['videoId'] != sorted_video[i]['id']) or (search_response['items'][i]['snippet']['channelId'] != channel_['id']):
-        #     print('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF')
-
-        shorts_result.append(search_item)
-
-    return SearchResponse.model_validate({
-        'item_count': len(search_response),
-        'type': 'shorts',
-        'items': shorts_result,
-    }).model_dump()
-
-    # except Exception as e:
-    #     raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

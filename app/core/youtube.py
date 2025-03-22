@@ -3,8 +3,7 @@ from app.core.config import settings
 from google.oauth2.credentials import Credentials  # Добавляем импорт
 from google.auth.transport.requests import Request
 from typing import Optional, Dict
-from datetime import datetime
-from datetime import timedelta
+from datetime import datetime, timedelta, UTC, timezone
 import os
 import re
 
@@ -196,3 +195,32 @@ def parse_duration(duration_str: str) -> int:
     seconds = int(match.group(3)) if match.group(3) else 0
 
     return hours * 3600 + minutes * 60 + seconds
+
+
+def get_rfc3339_date(period):
+    now = datetime.now(UTC)  # Используем UTC для единообразия
+
+    if period == 'all_time':
+        # Для 'all_time' возвращаем очень старую дату (например, начало Unix-эпохи)
+        start_date = datetime(1970, 1, 1, tzinfo=UTC)
+    elif period == 'last_week':
+        # Находим начало текущей недели (понедельник 00:00)
+        start_of_week = now - timedelta(days=now.isoweekday() - 1, hours=now.hour, minutes=now.minute, seconds=now.second, microseconds=now.microsecond)
+        start_date = start_of_week - timedelta(weeks=1)  # Отнимаем 1 неделю
+    elif period == 'last_month':
+        # Переходим на первый день предыдущего месяца
+        start_date = (now.replace(day=1) - timedelta(days=1)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    elif period == 'last_3_month':
+        # Переходим на первый день 3 месяцев назад
+        start_date = (now.replace(day=1) - timedelta(days=90)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    elif period == 'last_6_month':
+        # Переходим на первый день 6 месяцев назад
+        start_date = (now.replace(day=1) - timedelta(days=180)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    elif period == 'last_year':
+        # Переходим на первый день предыдущего года
+        start_date = now.replace(year=now.year - 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+    else:
+        raise ValueError(f"Неверный период: {period}")
+
+    # Форматируем дату в формате RFC 3339
+    return start_date.strftime("%Y-%m-%dT%H:%M:%SZ")

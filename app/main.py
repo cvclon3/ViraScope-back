@@ -1,4 +1,5 @@
 # app/main.py
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.params import Cookie
@@ -8,6 +9,7 @@ from app.models.user import User
 
 from app.api import videos, auth, favorites, search  # Импортируем favorites
 from app.api.auth import get_current_user
+
 from app.core.config import settings
 from app.core.database import init_db
 from starlette.middleware.sessions import SessionMiddleware
@@ -57,6 +59,7 @@ app.add_middleware(
     session_cookie="session_cookie"
 )
 
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Allow your frontend origin
@@ -70,6 +73,7 @@ app.add_middleware(
 app.include_router(auth.router, prefix="", tags=["auth"])
 app.include_router(favorites.router, prefix="/favorites", tags=["favorites"])
 app.include_router(search.router, prefix="/search", tags=["search"])
+app.include_router(getcomments.router, prefix="/forai", tags=["for ai"])
 
 
 # Создаем таблицы при старте приложения

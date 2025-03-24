@@ -7,7 +7,7 @@ from fastapi import Depends
 from app.core.database import SessionDep
 from app.models.user import User
 
-from app.api import videos, auth, favorites, search  # Импортируем favorites
+from app.api import videos, auth, favorites, search, getcomments  # Импортируем favorites
 from app.api.auth import get_current_user
 
 from app.core.config import settings

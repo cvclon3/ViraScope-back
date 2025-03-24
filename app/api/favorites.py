@@ -10,7 +10,7 @@ from app.core.database import get_db
 from app.models.user import User
 from app.models.favorite import FavoriteChannel
 from app.schemas.favorite import FavoriteChannelCreate, FavoriteChannelRead, FavoriteChannelList
-from app.api.users import get_current_active_user  # Используем нашу зависимость
+from app.api.auth import get_current_user  # Используем нашу зависимость
 from app.core.youtube import get_youtube_client, get_total_videos_on_channel, get_channel_info
 
 router = APIRouter()
@@ -28,7 +28,7 @@ def extract_channel_id(url: str) -> str | None:
 @router.post("/favorites/", response_model=List[FavoriteChannelRead], status_code=201)
 async def add_favorite_channels(
     channel_urls: List[str],  # Принимаем список URL
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """Добавляет каналы в избранное пользователя."""
@@ -95,14 +95,14 @@ async def add_favorite_channels(
     return [FavoriteChannelRead.model_validate(channel) for channel in added_channels] #возвращаем FavoriteChannelRead
 
 @router.get("/favorites/", response_model=FavoriteChannelList)
-async def get_favorite_channels(current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)):
+async def get_favorite_channels(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     """Возвращает список избранных каналов пользователя."""
     channels = db.exec(select(FavoriteChannel).where(FavoriteChannel.user_id == current_user.id)).all()
     return {"channels": channels}
 
 @router.delete("/favorites/{channel_id}", status_code=204)
 async def delete_favorite_channel(
-    channel_id: str, current_user: User = Depends(get_current_active_user), db: Session = Depends(get_db)
+    channel_id: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     """Удаляет канал из избранного пользователя."""
 

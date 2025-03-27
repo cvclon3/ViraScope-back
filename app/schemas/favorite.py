@@ -2,7 +2,6 @@
 
 from pydantic import BaseModel, HttpUrl
 from datetime import datetime
-from typing import Optional
 import uuid
 
 class FavoriteChannelBase(BaseModel):

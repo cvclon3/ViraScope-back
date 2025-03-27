@@ -14,9 +14,11 @@ class User(SQLModel, table=True):  # Наследуемся ТОЛЬКО от SQ
     is_active: bool = Field(default=True)
     is_superuser: bool = Field(default=False)
     favorite_channels: List["FavoriteChannel"] = Relationship(back_populates="user")
+    collections: List["Collection"] = Relationship(back_populates="user")
 
     # Другие поля
     class Config:
         from_attributes = True
 
 from .favorite import FavoriteChannel #  внизу, чтобы избежать циклического импорта
+from .collection import Collection

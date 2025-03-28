@@ -1,18 +1,15 @@
 # app/main.py
 
-from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.params import Cookie
+from starlette.middleware.sessions import SessionMiddleware
 from fastapi import Depends
-from app.core.database import SessionDep
 from app.models.user import User
 
-from app.api import videos, auth, favorites, search, getcomments  # Импортируем favorites
+from app.api import auth, favorites, search, getcomments, collections
 from app.api.auth import get_current_user
 
 from app.core.config import settings
 from app.core.database import init_db
-from starlette.middleware.sessions import SessionMiddleware
 
 from fastapi import FastAPI
 from fastapi.openapi.docs import (
@@ -72,6 +69,7 @@ app.add_middleware(
 # Подключаем роутеры
 app.include_router(auth.router, prefix="", tags=["auth"])
 app.include_router(favorites.router, prefix="/favorites", tags=["favorites"])
+app.include_router(collections.router, prefix="/collections", tags=["collections"])
 app.include_router(search.router, prefix="/search", tags=["search"])
 app.include_router(getcomments.router, prefix="/forai", tags=["for ai"])
 

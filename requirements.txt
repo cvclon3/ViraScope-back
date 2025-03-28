@@ -1,15 +1,15 @@
 fastapi~=0.115.7
 uvicorn[standard]~=0.34.0
 python-dotenv~=0.21.0
-google-api-python-client
+google-api-python-client~=2.164.0
 pydantic~=2.8.2
-pydantic-settings
+pydantic-settings~=2.8.1
 google-auth-oauthlib
 sqlalchemy~=2.0.34
 sqlmodel~=0.0.22
 psycopg2-binary  # Если используете PostgreSQL
 passlib~=1.7.4
-python-jose[cryptography]  # Для JWT
+python-jose[cryptography]~=3.4.0
 aiofiles~=24.1.0
 alembic~=1.13.3
 python-multipart~=0.0.20
@@ -17,3 +17,6 @@ httpx~=0.28.1
 authlib~=1.5.1
 itsdangerous~=2.2.0
 bcrypt~=4.3.0
+
+starlette~=0.46.1
+protobuf~=6.30.1

@@ -148,7 +148,7 @@ async def auth(request: Request, session: SessionDep):
         key="access_token",
         value=access_token,
         httponly=True,
-        secure=False,  # Ensure you're using HTTPS
+        secure=True,  # Ensure you're using HTTPS
         samesite="lax",  # Set the SameSite attribute to None
     )
 

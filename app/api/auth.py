@@ -4,13 +4,12 @@ from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Cookie
-from sqlmodel import select
 import uuid
 
 from starlette.responses import JSONResponse
 
 from app.core.config import settings
-from app.core.database import get_db, SessionDep
+from app.core.database import SessionDep  #, get_db
 from app.core.security import get_password_hash
 from app.models.user import User
 
@@ -36,6 +35,7 @@ oauth.register(
     jwks_uri="https://www.googleapis.com/oauth2/v3/certs",
     client_kwargs={"scope": "openid profile email"},
 )
+
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
@@ -83,6 +83,7 @@ def get_current_user(request: Request, session: SessionDep) -> Optional[User]:
     except Exception as e:
         traceback.print_exc()
         raise HTTPException(status_code=401, detail="Not Authenticated")
+
 
 def validate_user_request(token: str = Cookie(None)):
     session_details = get_current_user(token)
@@ -153,6 +154,11 @@ async def auth(request: Request, session: SessionDep):
     )
 
     return response
+
+
+@router.get("/auth/verify")
+async def auth_verify(current_user: User = Depends(get_current_user)):
+    return JSONResponse(status_code=200, content={"detail" : "authenticated"})
 
 
 @router.get("/logout")

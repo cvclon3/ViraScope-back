@@ -12,7 +12,6 @@ passlib~=1.7.4
 python-jose[cryptography]  # Для JWT
 aiofiles~=24.1.0
 alembic~=1.13.3
-pydantic[email]~=2.2.0
 python-multipart~=0.0.20
 httpx~=0.28.1
 authlib~=1.5.1

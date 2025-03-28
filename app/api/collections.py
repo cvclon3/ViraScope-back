@@ -52,6 +52,8 @@ async def get_collection(current_user: User = Depends(get_current_user), db: Ses
 
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
+    if collection.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="You can't add videos to this collection")
 
     return CollectionRead.from_db(collection)
 

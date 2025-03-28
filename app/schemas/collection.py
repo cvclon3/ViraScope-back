@@ -38,6 +38,7 @@ class CollectionRead(BaseModel):
     @classmethod
     def from_db(cls, db_model):
         # Конвертируем JSON строку обратно в список при чтении из БД
+        # TODO: дописать конвертацию URL в видео запросами к ютуб АПИ
         return cls(
             id=db_model.id,
             user_id=db_model.user_id,

@@ -1,4 +1,5 @@
 # app/api/collections.py
+import json
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -13,7 +14,7 @@ from app.api.auth import get_current_user  # Используем нашу за�
 
 router = APIRouter()
 
-@router.post("/", response_model=List[CollectionRead], status_code=201)
+@router.post("/", response_model=CollectionRead, status_code=201)
 async def create_collection(
     collection_title: str,
     current_user: User = Depends(get_current_user),
@@ -24,7 +25,7 @@ async def create_collection(
     db.add(collection)
     db.commit()
     db.refresh(collection)
-    return [collection]
+    return CollectionRead.from_db(collection)
 
 @router.get("/", response_model=CollectionList)
 async def get_collections(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -72,7 +73,13 @@ async def add_favorite_channels(
     if collection.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="You can't add videos to this collection")
 
-    collection.videos_urls.extend(videos_urls)
+    current_urls = json.loads(collection.videos_urls)
+    # Добавляем новые URL
+    current_urls.extend(videos_urls)
+    # Сохраняем обновленный список как JSON
+    collection.videos_urls = json.dumps(current_urls)
+
+    db.add(collection)
     db.commit()
     db.refresh(collection)
-    return collection
+    return CollectionRead.from_db(collection)

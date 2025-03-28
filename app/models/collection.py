@@ -1,5 +1,6 @@
 import uuid
 
+from pydantic import json
 from sqlalchemy import JSON
 from sqlmodel import SQLModel, Field, Relationship, UniqueConstraint
 from typing import Optional, List
@@ -9,7 +10,7 @@ class Collection(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True, index=True)
     user_id: uuid.UUID = Field(foreign_key="user.id")  # Внешний ключ на User
     collection_title: str = Field(index=True)
-    videos_urls: List[str] = Field(sa_type=JSON, default=[])
+    videos_urls: str = Field(default="[]")  # Храним как JSON строку
     added_at: datetime = Field(default_factory=datetime.now)
 
     user: "User" = Relationship(back_populates="collections") #Связь с User

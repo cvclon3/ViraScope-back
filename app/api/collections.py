@@ -21,11 +21,21 @@ async def create_collection(
     db: Session = Depends(get_db),
 ):
     """Создаёт новую коллекцию."""
+    collection = db.exec(
+        select(Collection)
+        .where(Collection.user_id == current_user.id)
+        .where(Collection.collection_title == collection_title)
+    ).first()
+
+    if collection:
+        raise HTTPException(status_code=400, detail="Collection with this title already exists")
+
     collection = Collection(user_id=current_user.id, collection_title=collection_title)
     db.add(collection)
     db.commit()
     db.refresh(collection)
     return CollectionRead.from_db(collection)
+
 
 @router.get("/", response_model=CollectionList)
 async def get_collections(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):

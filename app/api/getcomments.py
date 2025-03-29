@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Query, HTTPException, Response, status
-from app.core.youtube import get_youtube_client
+from googleapiclient.discovery import build
+from app.core.config import settings
 from urllib.parse import quote
 from typing import Optional, List
 from math import ceil
@@ -7,6 +8,18 @@ import json
 import uuid
 from pathlib import Path
 import aiofiles
+
+
+YOUTUBE_API_SERVICE_NAME = 'youtube'
+YOUTUBE_API_VERSION = 'v3'
+YOUTUBE_ANALYTICS_API_SERVICE_NAME = "youtubeAnalytics"
+YOUTUBE_ANALYTICS_API_VERSION = "v2"
+
+
+def get_youtube_client():
+    """Создает и возвращает клиентский объект YouTube API."""
+    return build(YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, developerKey=settings.youtube_api_key)
+
 
 
 router = APIRouter()

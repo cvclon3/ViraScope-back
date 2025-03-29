@@ -1,6 +1,11 @@
-from fastapi import APIRouter, Query, HTTPException, Response, status
+# app/api/search.py
+from fastapi import APIRouter, Query, HTTPException, Response, status, Depends # Добавляем Depends
+from googleapiclient.discovery import build # Для тайпхинта клиента
+from app.api.auth import get_user_youtube_client_via_cookie # Наша новая зависимость
+# Убираем импорт get_youtube_client из app.core.youtube
+# from app.core.youtube import get_youtube_client, parse_duration, get_rfc3339_date
+from app.core.youtube import parse_duration, get_rfc3339_date, get_channel_info, get_total_videos_on_channel # Импортируем нужные функции ядра
 from app.models.search_models import Item, SearchResponse
-from app.core.youtube import get_youtube_client, parse_duration, get_rfc3339_date
 from urllib.parse import quote
 import json
 import uuid
@@ -18,53 +23,6 @@ def sort_json_by_key_values(json_objects, key_values, key):
     sorted_objects = sorted(json_objects, key=lambda x: priority.get(x[key], len(key_values)))
 
     return sorted_objects
-
-
-def build_search_item_obj(search_r, video_r, channel_r, item_type='video'):
-    try:
-        likes = int(video_r['statistics']['likeCount']) if 'likeCount' in video_r['statistics'] else 0
-        likes_hidden = 'likeCount' not in video_r['statistics']
-
-        comments = int(video_r['statistics']['commentCount']) if 'commentCount' in video_r['statistics'] else 0
-        comments_hidden = 'commentCount' not in video_r['statistics']
-
-        avg_views_per_video = float(channel_r['statistics'].get('viewCount', 0))/float(channel_r['statistics'].get('videoCount', -1))
-        if avg_views_per_video <= 0:
-            avg_views_per_video = video_r['statistics']['viewCount']
-        combined_metric = float(video_r['statistics']['viewCount'])/avg_views_per_video
-
-        if item_type == 'video':
-            video_url = f'https://www.youtube.com/watch?v={video_r['id']}'
-        elif item_type == 'shorts':
-            video_url = f'https://www.youtube.com/shorts/{video_r["id"]}'
-        else:
-            video_url = f'https://www.youtube.com/watch?v={video_r["id"]}'
-
-        search_item = Item.model_validate({
-            'video_id': video_r['id'],
-            'title': video_r['snippet']['title'],
-            'thumbnail': video_r['snippet']['thumbnails']['high']['url'],
-            'published_at': video_r['snippet']['publishedAt'],
-            'views': int(video_r['statistics']['viewCount']),
-            'channel_title': channel_r['snippet']['title'],
-            'channel_url': f'https://www.youtube.com/channel/{channel_r['id']}',
-            'channel_subscribers': int(channel_r['statistics']['subscriberCount']),
-            'video_count': int(channel_r['statistics']['videoCount']),
-            'likes': likes,
-            'likes_hidden': likes_hidden,
-            'comments': comments,
-            'comments_hidden': comments_hidden,
-            'combined_metric': combined_metric,
-            'duration': parse_duration(video_r['contentDetails']['duration']),
-            'video_url': video_url,
-            'channel_thumbnail': channel_r['snippet']['thumbnails']['high']['url'],
-        })
-
-        return search_item.model_dump()
-
-    except Exception as e:
-        print(f"Error in build_search_item_obj for video ID {video_r['id']}: {e}")
-        return None
 
 
 def is_shorts(video_r):
@@ -106,77 +64,180 @@ def find_object_with_next(data, key, value):
     return next((obj for obj in data if obj.get(key) == value), None)
 
 
-async def get_videos(response, encoded_query, max_results, date_published, youtube, videos_result, page_token=None):
-    if page_token is None:
-        search_response = youtube.search().list(
+# --- Остальные функции (sort_json_by_key_values, save_json_to_file, find_object_with_next) остаются ---
+# ...
+
+# --- ИЗМЕНЕНИЕ: build_search_item_obj теперь принимает объект youtube ---
+async def build_search_item_obj(youtube: build, search_r, video_r, channel_id, item_type='video'):
+    try:
+        # Получаем информацию о канале с помощью функции ядра
+        channel_info = await get_channel_info(youtube, channel_id)
+        if not channel_info:
+            print(f"Could not get channel info for {channel_id}")
+            return None # Пропускаем видео, если не можем получить инфо о канале
+
+        # Данные видео уже есть в video_r
+        likes = int(video_r['statistics']['likeCount']) if 'likeCount' in video_r['statistics'] else 0
+        likes_hidden = 'likeCount' not in video_r['statistics']
+
+        comments = int(video_r['statistics']['commentCount']) if 'commentCount' in video_r['statistics'] else 0
+        comments_hidden = 'commentCount' not in video_r['statistics']
+
+        # Используем данные из channel_info
+        channel_views = channel_info.get('viewCount', 0)
+        channel_video_count = channel_info.get('videoCount', -1)
+
+        avg_views_per_video = float(channel_views) / float(channel_video_count) if channel_video_count > 0 else 0
+        if avg_views_per_video <= 0:
+            # Используем просмотры текущего видео как fallback, если среднее посчитать не удалось
+             avg_views_per_video = float(video_r['statistics'].get('viewCount', 0))
+
+        # Убедимся, что просмотры видео - это число
+        video_views = float(video_r['statistics'].get('viewCount', 0))
+        combined_metric = video_views / avg_views_per_video if avg_views_per_video > 0 else None
+
+
+        if item_type == 'video':
+            video_url = f'https://www.youtube.com/watch?v={video_r["id"]}'
+        elif item_type == 'shorts':
+            video_url = f'https://www.youtube.com/shorts/{video_r["id"]}'
+        else:
+            video_url = f'https://www.youtube.com/watch?v={video_r["id"]}'
+
+        search_item = Item.model_validate({
+            'video_id': video_r['id'],
+            'title': video_r['snippet']['title'],
+            'thumbnail': video_r['snippet']['thumbnails']['high']['url'],
+            'published_at': video_r['snippet']['publishedAt'],
+            'views': int(video_r['statistics'].get('viewCount', 0)), # Безопасное получение просмотров
+            'channel_title': channel_info['channel_title'],
+            'channel_url': channel_info['channel_url'],
+            'channel_subscribers': channel_info['channel_subscribers'],
+            'video_count': channel_info['videoCount'], # Используем videoCount из channel_info
+            'likes': likes,
+            'likes_hidden': likes_hidden,
+            'comments': comments,
+            'comments_hidden': comments_hidden,
+            'combined_metric': combined_metric,
+            'duration': parse_duration(video_r.get('contentDetails', {}).get('duration')), # Безопасное получение duration
+            'video_url': video_url,
+            'channel_thumbnail': channel_info['channel_thumbnail'],
+        })
+
+        return search_item.model_dump()
+
+    except KeyError as e:
+        print(f"KeyError in build_search_item_obj for video ID {video_r.get('id', 'N/A')}: Missing key {e}")
+        # traceback.print_exc()
+        return None
+    except Exception as e:
+        print(f"Error in build_search_item_obj for video ID {video_r.get('id', 'N/A')}: {e}")
+        # traceback.print_exc()
+        return None
+
+# --- Функции is_shorts, is_shorts_v остаются ---
+# ...
+
+# --- ИЗМЕНЕНИЕ: get_videos теперь принимает объект youtube ---
+async def get_videos(youtube: build, response: Response, encoded_query, max_results, date_published, videos_result, page_token=None):
+    try:
+        print(f"Searching YouTube with query: '{encoded_query}', date: {date_published}, page_token: {page_token}")
+        search_response_dict = youtube.search().list(
             q=encoded_query,
             part='snippet',
             type='video',
             pageToken=page_token,
-            publishedAfter=date_published,
-            maxResults=50,
+            publishedAfter=date_published if date_published else None, # Убедимся, что None передается, если дата не указана
+            maxResults=50, # Запрашиваем 50, чтобы иметь запас для фильтрации
         ).execute()
-    else:
-        search_response = youtube.search().list(
-            q=encoded_query,
-            part='snippet',
-            type='video',
-            publishedAfter=date_published,
-            maxResults=50,
+    except Exception as e:
+        print(f"Error during youtube.search().list: {e}")
+        # Проверяем на ошибки квоты или авторизации
+        if 'HttpError 403' in str(e) and 'quotaExceeded' in str(e):
+             raise HTTPException(status_code=429, detail="YouTube API quota exceeded for user.")
+        elif 'HttpError 401' in str(e) or 'HttpError 403' in str(e):
+             raise HTTPException(status_code=401, detail="YouTube API authorization error. Please re-login.")
+        else:
+             raise HTTPException(status_code=500, detail=f"YouTube API search error: {e}")
+
+
+    total_results = search_response_dict.get('pageInfo', {}).get('totalResults', 0)
+    next_page_token_from_api = search_response_dict.get('nextPageToken')
+    search_items = search_response_dict.get('items', [])
+
+    print(f"Found {len(search_items)} items in search results. Total results: {total_results}. Next page token: {next_page_token_from_api}")
+
+
+    if not search_items:
+        # Не ошибка, просто нет результатов
+        print("No search results found for this page.")
+        return videos_result, None, total_results # Возвращаем None как next_page_token
+
+    video_ids = [item["id"]["videoId"] for item in search_items if item.get("id", {}).get("videoId")]
+    # channel_ids = list({item["snippet"]["channelId"] for item in search_items if item.get("snippet", {}).get("channelId")}) # Уникальные ID каналов
+
+    if not video_ids:
+        print("No valid video IDs found in search results.")
+        return videos_result, next_page_token_from_api, total_results
+
+    print(f"Fetching details for {len(video_ids)} video IDs: {video_ids}")
+    try:
+        video_response = youtube.videos().list(
+            part="snippet,contentDetails,statistics",
+            id=','.join(video_ids),
         ).execute()
+        video_items = video_response.get('items', [])
+    except Exception as e:
+        print(f"Error during youtube.videos().list: {e}")
+        # Обработка ошибок API при запросе деталей видео
+        # Можно пропустить эту пачку или вернуть ошибку
+        return videos_result, next_page_token_from_api, total_results # Пропускаем, если не можем получить детали
 
-    total_results = search_response['pageInfo']['totalResults']
-    search_response = search_response['items']
+    print(f"Received details for {len(video_items)} videos.")
 
-    if len(search_response) == 0:
-        response.status_code = status.HTTP_406_NOT_ACCEPTABLE
-        return SearchResponse.model_validate({
-            'item_count': 0,
-            'type': 'video',
-            'items': [],
-        }).model_dump()
+    # Сопоставляем видео из поиска с их деталями
+    video_details_map = {v['id']: v for v in video_items}
 
-    video_ids = [item["id"]["videoId"] for item in search_response]
-    channel_ids = [item["snippet"]["channelId"] for item in search_response]
+    # --- УДАЛЕНО: Запрос channel_response, т.к. get_channel_info будет вызываться в build_search_item_obj ---
+    # channel_response = youtube.channels().list(...)
+    # sorted_channel = ...
 
-    video_response = youtube.videos().list(
-        part="snippet,contentDetails,statistics",
-        id=','.join(video_ids),
-    ).execute()
+    # await save_json_to_file(...) # Сохранение ответа для отладки
 
-    sorted_video = sort_json_by_key_values(video_response['items'], video_ids, 'id')
+    processed_count = 0
+    for search_item in search_items:
+        video_id = search_item.get("id", {}).get("videoId")
+        channel_id = search_item.get("snippet", {}).get("channelId")
+        video_detail = video_details_map.get(video_id)
 
-    channel_response = youtube.channels().list(
-        part="snippet,contentDetails,statistics",
-        id=','.join(channel_ids),
-    ).execute()
+        if not video_id or not channel_id or not video_detail:
+            print(f"Skipping item due to missing data: video_id={video_id}, channel_id={channel_id}, has_details={bool(video_detail)}")
+            continue # Пропускаем, если нет ID или деталей
 
-    sorted_channel = sort_json_by_key_values(channel_response['items'], channel_ids, 'id')
-
-    await save_json_to_file({
-        'search_video': search_response,
-        'videos': sorted_video,
-        'channels': sorted_channel,
-    })
-
-    for i in range(min(max_results, len(search_response))):
-        if is_shorts_v(sorted_video[i]):
+        # Проверяем, не шортс ли это (если мы ищем обычные видео)
+        if is_shorts_v(video_detail): # is_shorts_v ожидает объект video_detail
+            print(f"Skipping video {video_id} as it's identified as shorts.")
             continue
 
-        channel_ = find_object_with_next(sorted_channel, 'id', sorted_video[i]['snippet']['channelId'])
-
-        search_item = build_search_item_obj(
-            search_response[i],
-            sorted_video[i],
-            channel_,
+        # --- ИЗМЕНЕНИЕ: Передаем youtube и channel_id в build_search_item_obj ---
+        built_item = await build_search_item_obj(
+            youtube,
+            search_item, # Результат поиска (для возможного использования в будущем)
+            video_detail, # Детали видео
+            channel_id, # ID канала
         )
 
-        # if (search_response['items'][i]['id']['videoId'] != sorted_video[i]['id']) or (search_response['items'][i]['snippet']['channelId'] != channel_['id']):
-        #     print('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF')
+        if built_item:
+            videos_result.append(built_item)
+            processed_count += 1
+            if len(videos_result) >= max_results: # Проверяем здесь, чтобы не обрабатывать лишнего
+                 print(f"Reached max_results ({max_results}). Stopping processing.")
+                 break # Достаточно результатов
 
-        videos_result.append(search_item)
+    print(f"Processed {processed_count} items from this page. Total results in list: {len(videos_result)}")
 
-    return videos_result, page_token, total_results
+    # Возвращаем обновленный список, токен следующей страницы и общее количество
+    return videos_result, next_page_token_from_api, total_results
 
 
 @router.get("/videos", response_model=SearchResponse)
@@ -184,202 +245,191 @@ async def search_videos(
     response: Response,
     query: str = Query(..., description="Поисковый запрос (название видео)"),
     max_results: int = Query(50, description="Количество видео в ответе", ge=1, le=50),
-    date_published: str = Query('all_time', description="Дата публикации \
-    (all_time, last_week, last_month, last_3_month, last_6_month, last_year")
+    date_published_filter: str = Query('all_time', alias="date_published", description="Дата публикации (all_time, last_week, last_month, last_3_month, last_6_month, last_year)"),
+    # --- ИЗМЕНЕНИЕ: Добавляем зависимость для получения клиента YouTube ---
+    youtube: build = Depends(get_user_youtube_client_via_cookie)
 ):
     """
-    Эндпоинт для поиска видео с фильтрацией.
+    Эндпоинт для поиска видео с фильтрацией. Требует аутентификации.
     """
+    print(f"Received video search request: query='{query}', max_results={max_results}, date='{date_published_filter}'")
+    if date_published_filter not in ('all_time', 'last_week', 'last_month', 'last_3_month', 'last_6_month', 'last_year'):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid value for date_published')
+
+    encoded_query = quote(query, safe="") # Кодируем запрос
+    rfc3339_date = get_rfc3339_date(date_published_filter) if date_published_filter != 'all_time' else None
+    videos_result = []
+    next_page_token = None
+    total_results_estimate = 0 # Примерное общее количество
+    max_pages_to_fetch = 5 # Ограничение на количество страниц для предотвращения долгого выполнения
+
     try:
-        if date_published not in ('all_time', 'last_week', 'last_month', 'last_3_month', 'last_6_month', 'last_year'):
-            raise HTTPException(status_code=status.HTTP_406_NOT_ACCEPTABLE, detail='date_published value error')
-
-        encoded_query = quote(query, safe="-|")
-        youtube = get_youtube_client()
-        videos_result = []
-
-        videos_result, next_page_token, total_results = await get_videos(
-            response=response,
-            encoded_query=encoded_query,
-            max_results=max_results,
-            date_published=get_rfc3339_date(date_published),
-            youtube=youtube,
-            videos_result=videos_result,
-            page_token=None
-        )
-
-        print(total_results)
-
-        if len(videos_result) < max_results and total_results > 50:
-            videos_result, _, total_results = await get_videos(
+        for page_num in range(max_pages_to_fetch):
+            print(f"Fetching page {page_num + 1}...")
+            videos_result, next_page_token, total_results_estimate = await get_videos(
+                youtube=youtube,
                 response=response,
                 encoded_query=encoded_query,
-                max_results=max_results,
-                date_published=get_rfc3339_date(date_published),
-                youtube=youtube,
-                videos_result=videos_result,
+                max_results=max_results, # Передаем желаемое конечное количество
+                date_published=rfc3339_date,
+                videos_result=videos_result, # Передаем текущий список для дополнения
                 page_token=next_page_token
             )
 
-        # search_response_medium = youtube.search().list(
-        #     q=encoded_query,
-        #     part='snippet',
-        #     type='video',
-        #     videoDuration='medium',
-        #     maxResults=25,
-        # ).execute()
-        #
-        # search_response_long = youtube.search().list(
-        #     q=encoded_query,
-        #     part='snippet',
-        #     type='video',
-        #     videoDuration='long',
-        #     maxResults=25,
-        # ).execute()
-        #
-        # search_response = search_response_medium['items'] + search_response_long['items']
-        #
-        # if len(search_response) == 0:
-        #     response.status_code = status.HTTP_406_NOT_ACCEPTABLE
-        #     return SearchResponse.model_validate({
-        #         'item_count': 0,
-        #         'type': 'video',
-        #         'items': [],
-        #     }).model_dump()
-        #
-        #
-        # video_ids = [item["id"]["videoId"] for item in search_response]
-        # channel_ids = [item["snippet"]["channelId"] for item in search_response]
-        #
-        # video_response = youtube.videos().list(
-        #     part="snippet,contentDetails,statistics",
-        #     id=','.join(video_ids),
-        # ).execute()
-        #
-        # sorted_video = sort_json_by_key_values(video_response['items'], video_ids, 'id')
-        #
-        # channel_response = youtube.channels().list(
-        #     part="snippet,contentDetails,statistics",
-        #     id=','.join(channel_ids),
-        # ).execute()
-        #
-        # sorted_channel = sort_json_by_key_values(channel_response['items'], channel_ids, 'id')
-        #
-        # await save_json_to_file({
-        #     'search_medium': search_response_medium,
-        #     'search_long': search_response_long,
-        #     'videos': sorted_video,
-        #     'channels': sorted_channel,
-        # })
-        #
-        # for i in range(min(max_results, len(search_response))):
-        #     channel_ = find_object_with_next(sorted_channel, 'id', sorted_video[i]['snippet']['channelId'])
-        #
-        #     search_item = build_search_item_obj(
-        #         search_response[i],
-        #         sorted_video[i],
-        #         channel_,
-        #     )
-        #
-        #     # if (search_response['items'][i]['id']['videoId'] != sorted_video[i]['id']) or (search_response['items'][i]['snippet']['channelId'] != channel_['id']):
-        #     #     print('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF')
-        #
-        #     videos_result.append(search_item)
+            print(f"After page {page_num + 1}: {len(videos_result)} results collected. Next page token: {next_page_token}")
+
+            # Проверяем, достигли ли мы нужного количества или закончились страницы
+            if len(videos_result) >= max_results or not next_page_token:
+                print("Stopping pagination: reached max results or no more pages.")
+                break
+        else:
+             print(f"Stopped pagination after reaching max pages ({max_pages_to_fetch}).")
+
+
+        final_results = videos_result[:max_results] # Обрезаем до нужного количества
+        print(f"Returning {len(final_results)} video results.")
 
         return SearchResponse.model_validate({
-            'item_count': min(max_results, len(videos_result)),
+            'item_count': len(final_results),
             'type': 'videos',
-            'items': videos_result[:min(max_results, len(videos_result))],
+            'items': final_results,
         }).model_dump()
 
+    except HTTPException as he:
+         # Пробрасываем ошибки HTTP, которые могли возникнуть в get_videos
+         raise he
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Unexpected error in search_videos endpoint: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Internal server error during video search: {e}")
 
-
+# --- ИЗМЕНЕНИЕ: Аналогично для search_shorts ---
 @router.get("/shorts", response_model=SearchResponse)
 async def search_shorts(
     response: Response,
     query: str = Query(..., description="Поисковый запрос (название шортсов)"),
     max_results: int = Query(50, description="Количество видео в ответе", ge=1, le=50),
-    date_published: str = Query('all_time', description="Дата публикации \
-    (all_time, last_week, last_month, last_3_month, last_6_month, last_year)")
+    date_published_filter: str = Query('all_time', alias="date_published", description="Дата публикации (all_time, last_week, last_month, last_3_month, last_6_month, last_year)"),
+    # --- ИЗМЕНЕНИЕ: Добавляем зависимость ---
+    youtube: build = Depends(get_user_youtube_client_via_cookie)
 ):
     """
-    Эндпоинт для поиска видео с фильтрацией.
+    Эндпоинт для поиска shorts с фильтрацией. Требует аутентификации.
     """
+    print(f"Received shorts search request: query='{query}', max_results={max_results}, date='{date_published_filter}'")
+    if date_published_filter not in ('all_time', 'last_week', 'last_month', 'last_3_month', 'last_6_month', 'last_year'):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid value for date_published')
+
+    encoded_query = quote(query, safe="")
+    rfc3339_date = get_rfc3339_date(date_published_filter) if date_published_filter != 'all_time' else None
+    shorts_result = []
+    next_page_token = None
+    total_results_estimate = 0
+    max_pages_to_fetch = 5 # Ограничение
+
     try:
-        if date_published not in ('all_time', 'last_week', 'last_month', 'last_3_month', 'last_6_month', 'last_year'):
-            raise HTTPException(status_code=status.HTTP_406_NOT_ACCEPTABLE, detail='date_published value error')
+        for page_num in range(max_pages_to_fetch):
+             print(f"Fetching page {page_num + 1} for shorts...")
+             try:
+                 search_response_dict = youtube.search().list(
+                     q=encoded_query,
+                     part='snippet',
+                     type='video',
+                     videoDuration='short', # Ищем только короткие видео
+                     pageToken=next_page_token,
+                     publishedAfter=rfc3339_date,
+                     maxResults=50, # Запрашиваем больше для фильтрации
+                 ).execute()
+             except Exception as e:
+                 print(f"Error during youtube.search().list for shorts: {e}")
+                 if 'HttpError 403' in str(e) and 'quotaExceeded' in str(e):
+                     raise HTTPException(status_code=429, detail="YouTube API quota exceeded for user.")
+                 elif 'HttpError 401' in str(e) or 'HttpError 403' in str(e):
+                     raise HTTPException(status_code=401, detail="YouTube API authorization error. Please re-login.")
+                 else:
+                     raise HTTPException(status_code=500, detail=f"YouTube API search error: {e}")
 
-        encoded_query = quote(query, safe="-|")
-        youtube = get_youtube_client()
+             total_results_estimate = search_response_dict.get('pageInfo', {}).get('totalResults', 0)
+             next_page_token = search_response_dict.get('nextPageToken')
+             search_items = search_response_dict.get('items', [])
 
-        search_response_short = youtube.search().list(
-            q=encoded_query,
-            part='snippet',
-            type='video',
-            videoDuration='short',
-            publishedAfter=get_rfc3339_date(date_published),
-            maxResults=50,
-        ).execute()
+             print(f"Found {len(search_items)} potential shorts. Total results: {total_results_estimate}. Next page token: {next_page_token}")
 
-        search_response = search_response_short['items']
 
-        if len(search_response) == 0:
-            response.status_code = status.HTTP_406_NOT_ACCEPTABLE
-            return SearchResponse.model_validate({
-                'item_count': 0,
-                'type': 'shorts',
-                'items': [],
-            }).model_dump()
+             if not search_items:
+                 print("No more potential shorts found.")
+                 break # Прерываем пагинацию
 
-        video_ids = [item["id"]["videoId"] for item in search_response]
-        channel_ids = [item["snippet"]["channelId"] for item in search_response]
+             video_ids = [item["id"]["videoId"] for item in search_items if item.get("id", {}).get("videoId")]
 
-        video_response = youtube.videos().list(
-            part="snippet,contentDetails,statistics",
-            id=','.join(video_ids),
-        ).execute()
+             if not video_ids:
+                 continue # Следующая страница, если нет ID
 
-        sorted_video = sort_json_by_key_values(video_response['items'], video_ids, 'id')
+             try:
+                 video_response = youtube.videos().list(
+                     part="snippet,contentDetails,statistics",
+                     id=','.join(video_ids),
+                 ).execute()
+                 video_items = video_response.get('items', [])
+             except Exception as e:
+                 print(f"Error during youtube.videos().list for shorts details: {e}")
+                 continue # Пропускаем эту страницу при ошибке получения деталей
 
-        channel_response = youtube.channels().list(
-            part="snippet,contentDetails,statistics",
-            id=','.join(channel_ids),
-        ).execute()
+             video_details_map = {v['id']: v for v in video_items}
 
-        sorted_channel = sort_json_by_key_values(channel_response['items'], channel_ids, 'id')
+             processed_count_page = 0
+             for search_item in search_items:
+                 video_id = search_item.get("id", {}).get("videoId")
+                 channel_id = search_item.get("snippet", {}).get("channelId")
+                 video_detail = video_details_map.get(video_id)
 
-        await save_json_to_file({
-            'search_short': search_response_short,
-            'videos': sorted_video,
-            'channels': sorted_channel,
-        })
+                 if not video_id or not channel_id or not video_detail:
+                     continue
 
-        shorts_result = []
-        for i in range(min(max_results, len(search_response))):
-            if not is_shorts(sorted_video[i]):
-                continue
+                 # --- ИЗМЕНЕНИЕ: Дополнительная проверка на is_shorts ---
+                 # is_shorts проверяет еще и по тегам/длительности
+                 if not is_shorts(video_detail):
+                      print(f"Skipping video {video_id} as it's not identified as shorts by duration/tags.")
+                      continue
 
-            channel_ = find_object_with_next(sorted_channel, 'id', sorted_video[i]['snippet']['channelId'])
+                 built_item = await build_search_item_obj(
+                     youtube,
+                     search_item,
+                     video_detail,
+                     channel_id,
+                     item_type='shorts', # Указываем тип
+                 )
 
-            search_item = build_search_item_obj(
-                search_response[i],
-                sorted_video[i],
-                channel_,
-                item_type='shorts',
-            )
+                 if built_item:
+                     shorts_result.append(built_item)
+                     processed_count_page += 1
+                     if len(shorts_result) >= max_results:
+                         break # Достаточно результатов
 
-            # if (search_response['items'][i]['id']['videoId'] != sorted_video[i]['id']) or (search_response['items'][i]['snippet']['channelId'] != channel_['id']):
-            #     print('FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF')
+             print(f"Processed {processed_count_page} shorts from this page. Total collected: {len(shorts_result)}")
 
-            shorts_result.append(search_item)
+             # Проверяем выход из обоих циклов (внутреннего и внешнего)
+             if len(shorts_result) >= max_results or not next_page_token:
+                 print("Stopping shorts pagination: reached max results or no more pages.")
+                 break # Выход из цикла пагинации
+        else:
+             print(f"Stopped shorts pagination after reaching max pages ({max_pages_to_fetch}).")
+
+
+        final_results = shorts_result[:max_results]
+        print(f"Returning {len(final_results)} shorts results.")
 
         return SearchResponse.model_validate({
-            'item_count': min(max_results, len(shorts_result)),
+            'item_count': len(final_results),
             'type': 'shorts',
-            'items': shorts_result[:min(max_results, len(shorts_result))],
+            'items': final_results,
         }).model_dump()
 
+    except HTTPException as he:
+         raise he
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Unexpected error in search_shorts endpoint: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Internal server error during shorts search: {e}")

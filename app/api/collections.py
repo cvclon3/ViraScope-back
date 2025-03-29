@@ -17,6 +17,7 @@ router = APIRouter()
 @router.post("/", response_model=CollectionRead, status_code=201)
 async def create_collection(
     collection_title: str,
+    videos_urls: List[str],
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -31,6 +32,7 @@ async def create_collection(
         raise HTTPException(status_code=400, detail="Collection with this title already exists")
 
     collection = Collection(user_id=current_user.id, collection_title=collection_title)
+    collection.videos_urls = json.dumps(videos_urls)
     db.add(collection)
     db.commit()
     db.refresh(collection)

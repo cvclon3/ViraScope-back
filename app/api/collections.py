@@ -94,10 +94,12 @@ async def delete_collection(
     db.commit()
     return {"message": "Collection deleted"}
 
-@router.put("/add/{collection_id}", response_model=CollectionRead, status_code=201)
-async def add_videos_to_collection(
-    videos_urls: List[str],  # Принимаем список URL
+@router.put("/edit/{collection_id}", response_model=CollectionRead, status_code=201)
+async def edit_collection(
+    add_videos_urls: List[str],  # Принимаем список URL для добавления
+    remove_videos_urls: List[str],  # Принимаем список URL для удаления
     collection_id: int,
+    collection_title: str | None = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -113,39 +115,14 @@ async def add_videos_to_collection(
     if collection.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="You can't add videos to this collection")
 
+    if collection_title:
+        collection.collection_title = collection_title
+
     current_urls = json.loads(collection.videos_urls)
     # Добавляем новые URL
-    current_urls.extend(videos_urls)
-    # Сохраняем обновленный список как JSON
-    collection.videos_urls = json.dumps(current_urls)
-
-    db.add(collection)
-    db.commit()
-    db.refresh(collection)
-    return CollectionRead.from_db(collection)
-
-@router.put("/remove/{collection_id}", response_model=CollectionRead, status_code=201)
-async def remove_videos_from_collection(
-    videos_urls: List[str],  # Принимаем список URL
-    collection_id: int,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    """Удаляет видео из коллекции пользователя."""
-    collection = db.exec(
-        select(Collection)
-        .where(Collection.id == collection_id)
-    ).first()
-
-    if not collection:
-        raise HTTPException(status_code=404, detail="Collection not found")
-
-    if collection.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="You can't add videos to this collection")
-
-    current_urls = json.loads(collection.videos_urls)
+    current_urls.extend(add_videos_urls)
     # Удаляем URL
-    current_urls = [x for x in current_urls if x not in videos_urls]
+    current_urls = [x for x in current_urls if x not in remove_videos_urls]
     # Сохраняем обновленный список как JSON
     collection.videos_urls = json.dumps(current_urls)
 
@@ -153,4 +130,3 @@ async def remove_videos_from_collection(
     db.commit()
     db.refresh(collection)
     return CollectionRead.from_db(collection)
-

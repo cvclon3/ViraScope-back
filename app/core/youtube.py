@@ -1,109 +1,49 @@
-from googleapiclient.discovery import build
+# app/core/youtube.py
+
+# УДАЛЯЕМ get_youtube_client() и get_analytics_client()
+# from googleapiclient.discovery import build
+# from google.oauth2.credentials import Credentials
+# from google.auth.transport.requests import Request
+# import os
+
 from app.core.config import settings
-from google.oauth2.credentials import Credentials  # Добавляем импорт
-from google.auth.transport.requests import Request
 from typing import Optional, Dict
-from datetime import datetime, timedelta, UTC, timezone
-import os
+from datetime import datetime, timedelta, UTC, timezone # Добавляем timezone и UTC
 import re
 
-
+# Оставляем константы и вспомогательные функции
 YOUTUBE_API_SERVICE_NAME = 'youtube'
 YOUTUBE_API_VERSION = 'v3'
-YOUTUBE_ANALYTICS_API_SERVICE_NAME = "youtubeAnalytics"
-YOUTUBE_ANALYTICS_API_VERSION = "v2"
+# YOUTUBE_ANALYTICS_API_SERVICE_NAME = "youtubeAnalytics" # Пока не используем
+# YOUTUBE_ANALYTICS_API_VERSION = "v2"
 
+# --- Функции get_recent_views, get_total_videos_on_channel, get_channel_info, get_channel_views ---
+# --- должны теперь принимать объект 'youtube' (клиент API) как аргумент ---
 
-def get_youtube_client():
-    """Создает и возвращает клиентский объект YouTube API."""
-    return build(YOUTUBE_API_SERVICE_NAME, YOUTUBE_API_VERSION, developerKey=settings.youtube_api_key)
-
-
-def get_analytics_client():
-    """
-    Создает клиент YouTube Analytics API с использованием OAuth 2.0.
-
-    Требует наличия файла с токеном (token.json) или client_secrets.json.
-    """
-    credentials = None
-    # Проверяем наличие файла token.json с сохраненными учетными данными
-    if os.path.exists('token.json'):
-        credentials = Credentials.from_authorized_user_file('token.json')
-    # Если учетных данных нет или они недействительны, пытаемся обновить или получить новые
-    if not credentials or not credentials.valid:
-        if credentials and credentials.expired and credentials.refresh_token:
-            credentials.refresh(Request())
-        else:
-            # Здесь предполагается, что у вас есть файл client_secrets.json,
-            # полученный из Google Cloud Console.  См. документацию YouTube Analytics API.
-            # Этот код предназначен для примера и может потребовать адаптации.
-            # Важно: НЕ храните client_secrets.json в репозитории!
-            if os.path.exists('client_secrets.json'):
-               from google_auth_oauthlib.flow import InstalledAppFlow #нужно установить google-auth-oauthlib
-               flow = InstalledAppFlow.from_client_secrets_file(
-                   'client_secrets.json',
-                   ['https://www.googleapis.com/auth/yt-analytics.readonly'] # Нужный scope
-               )
-               credentials = flow.run_local_server(port=settings.flow_port) # Запускаем локальный сервер для OAuth
-            else:
-                raise FileNotFoundError("Не найден файл client_secrets.json.  Следуйте инструкциям по настройке OAuth 2.0 для YouTube Analytics API.")
-        # Сохраняем учетные данные для последующего использования
-        with open('token.json', 'w') as token:
-            token.write(credentials.to_json())
-
-    return build(YOUTUBE_ANALYTICS_API_SERVICE_NAME, YOUTUBE_ANALYTICS_API_VERSION, credentials=credentials)
-
-
-async def get_recent_views(video_id: str, days: int = 7) -> Optional[int]:
+async def get_recent_views(youtube, video_id: str, days: int = 7) -> Optional[int]:
     """
     Получает количество просмотров видео за последние `days` дней с помощью YouTube Analytics API.
-
-    Args:
-        video_id: ID видео.
-        days: Количество дней, за которые нужно получить просмотры.
-
-    Returns:
-        Количество просмотров или None, если произошла ошибка.
+    ПРИМЕЧАНИЕ: Эта функция требует прав yt-analytics.readonly и будет работать ТОЛЬКО для канала,
+    к которому пользователь дал доступ (обычно его собственный).
+    Требует другого клиента API (Analytics). Пока не используется активно.
     """
-    try:
-        analytics = get_analytics_client()  # Получаем клиент Analytics API
+    # try:
+    #     # Клиент Analytics нужно создавать отдельно с нужными credentials
+    #     # analytics = build(YOUTUBE_ANALYTICS_API_SERVICE_NAME, YOUTUBE_ANALYTICS_API_VERSION, credentials=youtube.credentials)
+    #     # ... остальная логика ...
+    #     return 0 # Заглушка
+    # except Exception as e:
+    #     print(f"Error in get_recent_views for video ID {video_id}: {e}")
+    #     return None
+    print(f"WARNING: get_recent_views is currently disabled/requires Analytics API setup.")
+    return 0 # Возвращаем 0 или None, т.к. функционал пока не активен с user credentials
 
-        # Вычисляем даты начала и конца периода
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=days)
-
-        # Форматируем даты в нужный формат (YYYY-MM-DD)
-        start_date_str = start_date.strftime('%Y-%m-%d')
-        end_date_str = end_date.strftime('%Y-%m-%d')
-
-        # Выполняем запрос к YouTube Analytics API
-        response = analytics.reports().query(
-            ids=f'channel==MINE',  # Используем 'channel==MINE' для запроса по своему каналу
-            startDate=start_date_str,
-            endDate=end_date_str,
-            metrics='views',
-            filters=f'video=={video_id}',
-            dimensions='video' # Важно, чтобы получать данные по конкретному видео
-        ).execute()
-
-        # Извлекаем количество просмотров (если они есть)
-        if 'rows' in response and response['rows']:
-             # Обычно, если данные есть, то будет только одна строка
-             return response['rows'][0][0] #первая колонка - это views
-        else:
-            return 0 # Нет данных за этот период
-
-    except Exception as e:
-        print(f"Error in get_recent_views for video ID {video_id}: {e}")
-        return None
-
-
-def get_total_videos_on_channel(channel_id: str) -> Optional[int]:
+def get_total_videos_on_channel(youtube, channel_id: str) -> Optional[int]:
     """
     Получает общее количество видео на канале.
+    Принимает аутентифицированный клиент 'youtube'.
     """
     try:
-        youtube = get_youtube_client()
         channel_response = youtube.channels().list(
             part="statistics",
             id=channel_id
@@ -117,29 +57,28 @@ def get_total_videos_on_channel(channel_id: str) -> Optional[int]:
 
     except Exception as e:
       print(f"Error in get_total_videos_on_channel for {channel_id=}: {e}")
+      # Проверим на ошибки авторизации
+      if 'HttpError 403' in str(e) and 'quotaExceeded' in str(e):
+           print("Quota exceeded for the user.")
+           # Можно выбросить специфическое исключение или вернуть код ошибки
+      elif 'HttpError 401' in str(e) or 'HttpError 403' in str(e):
+           print("Authorization error getting total videos.")
+      # traceback.print_exc() # Раскомментировать для детальной отладки
       return None
 
-
-#Добавляем метод get_channel_info
-async def get_channel_info(channel_id: str) -> Optional[Dict]:
+async def get_channel_info(youtube, channel_id: str) -> Optional[Dict]:
     """
     Получает информацию о канале по его ID.
-
-    Args:
-        channel_id: ID канала.
-
-    Returns:
-        Словарь с информацией о канале или None, если произошла ошибка.
+    Принимает аутентифицированный клиент 'youtube'.
     """
     try:
-        youtube = get_youtube_client()
         channel_response = youtube.channels().list(
-            part="snippet,statistics",  # Запрашиваем snippet и statistics
+            part="snippet,statistics",
             id=channel_id
         ).execute()
 
         if not channel_response["items"]:
-            return None  # Канал не найден
+            return None
 
         channel_data = channel_response["items"][0]
         snippet = channel_data["snippet"]
@@ -147,43 +86,60 @@ async def get_channel_info(channel_id: str) -> Optional[Dict]:
 
         channel_info = {
             'channel_title': snippet['title'],
-            'channel_thumbnail': snippet['thumbnails']['high']['url'],  # Можно выбрать другое разрешение
+            'channel_thumbnail': snippet['thumbnails']['high']['url'],
             'channel_subscribers': int(statistics['subscriberCount']) if 'subscriberCount' in statistics else 0,
             'channel_url': f'https://www.youtube.com/channel/{channel_id}',
+            # Добавим недостающие поля, если они нужны дальше
+            'viewCount': int(statistics['viewCount']) if 'viewCount' in statistics else 0,
+            'videoCount': int(statistics['videoCount']) if 'videoCount' in statistics else 0,
         }
         return channel_info
 
     except Exception as e:
         print(f"Error in get_channel_info for channel ID {channel_id}: {e}")
+        # Проверим на ошибки авторизации
+        if 'HttpError 403' in str(e) and 'quotaExceeded' in str(e):
+             print("Quota exceeded for the user.")
+        elif 'HttpError 401' in str(e) or 'HttpError 403' in str(e):
+             print("Authorization error getting channel info.")
+        # traceback.print_exc()
         return None
 
 
-async def get_channel_views(channel_id: str) -> Optional[int]:
+async def get_channel_views(youtube, channel_id: str) -> Optional[int]:
     """
     Получает суммарное количество просмотров на канале.
+    Принимает аутентифицированный клиент 'youtube'.
     """
     try:
-        youtube = get_youtube_client()
-        channel_response = youtube.channels().list(
-            part="statistics",
-            id=channel_id
-        ).execute()
-
-        if not channel_response["items"]:
-            return None
-        channel_stats = channel_response["items"][0]["statistics"]
-        return int(channel_stats['viewCount']) if 'viewCount' in channel_stats else 0 #Всего просмотров
+        # Можно использовать get_channel_info, чтобы не делать лишний запрос
+        info = await get_channel_info(youtube, channel_id)
+        return info.get('viewCount') if info else None
+        # Или сделать отдельный запрос, если нужна только эта метрика
+        # channel_response = youtube.channels().list(
+        #     part="statistics",
+        #     id=channel_id
+        # ).execute()
+        # if not channel_response["items"]:
+        #     return None
+        # channel_stats = channel_response["items"][0]["statistics"]
+        # return int(channel_stats['viewCount']) if 'viewCount' in channel_stats else 0
 
     except Exception as e:
         print(f"Error in get_channel_views for channel ID {channel_id}: {e}")
+        # Проверим на ошибки авторизации
+        if 'HttpError 403' in str(e) and 'quotaExceeded' in str(e):
+             print("Quota exceeded for the user.")
+        elif 'HttpError 401' in str(e) or 'HttpError 403' in str(e):
+             print("Authorization error getting channel views.")
+        # traceback.print_exc()
         return None
 
 
 def parse_duration(duration_str: str) -> int:
-    """
-    Преобразует строку длительности видео в формате ISO 8601 в секунды.
-    Взято из https://stackoverflow.com/questions/39825838/how-to-parse-youtube-video-duration-from-youtube-data-api-response
-    """
+    """Преобразует строку длительности видео в формате ISO 8601 в секунды."""
+    if not duration_str: # Добавим проверку на None или пустую строку
+        return 0
     pattern = r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?'
     match = re.match(pattern, duration_str)
 
@@ -198,29 +154,27 @@ def parse_duration(duration_str: str) -> int:
 
 
 def get_rfc3339_date(period):
-    now = datetime.now(UTC)  # Используем UTC для единообразия
+    # Убедимся, что now использует timezone.utc
+    now = datetime.now(timezone.utc)
 
     if period == 'all_time':
-        # Для 'all_time' возвращаем очень старую дату (например, начало Unix-эпохи)
-        start_date = datetime(1970, 1, 1, tzinfo=UTC)
+        start_date = datetime(1970, 1, 1, tzinfo=timezone.utc)
     elif period == 'last_week':
-        # Находим начало текущей недели (понедельник 00:00)
-        start_of_week = now - timedelta(days=now.isoweekday() - 1, hours=now.hour, minutes=now.minute, seconds=now.second, microseconds=now.microsecond)
-        start_date = start_of_week - timedelta(weeks=1)  # Отнимаем 1 неделю
+        # Идем к началу текущего дня и отнимаем 7 дней
+        start_date = (now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=7))
     elif period == 'last_month':
-        # Переходим на первый день предыдущего месяца
-        start_date = (now.replace(day=1) - timedelta(days=1)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        # Отнимаем 30 дней (приблизительно)
+        start_date = (now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=30))
     elif period == 'last_3_month':
-        # Переходим на первый день 3 месяцев назад
-        start_date = (now.replace(day=1) - timedelta(days=90)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+         start_date = (now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=90))
     elif period == 'last_6_month':
-        # Переходим на первый день 6 месяцев назад
-        start_date = (now.replace(day=1) - timedelta(days=180)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+         start_date = (now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=180))
     elif period == 'last_year':
-        # Переходим на первый день предыдущего года
-        start_date = now.replace(year=now.year - 1, month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+         start_date = (now.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=365))
     else:
-        raise ValueError(f"Неверный период: {period}")
+        # По умолчанию - all_time или ошибка
+        # raise ValueError(f"Неверный период: {period}")
+        start_date = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
     # Форматируем дату в формате RFC 3339
     return start_date.strftime("%Y-%m-%dT%H:%M:%SZ")

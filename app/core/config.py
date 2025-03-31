@@ -8,7 +8,7 @@ load_dotenv()
 
 
 class Settings(BaseSettings):
-    youtube_api_key: str = os.getenv("YOUTUBE_API_KEY")
+    # youtube_api_key: str = os.getenv("YOUTUBE_API_KEY")
     app_name: str = "My YouTube App"
     flow_port: int = os.getenv("FLOW_PORT")
     database_url: str = os.getenv("DATABASE_URL", "sqlite:///./test.db")

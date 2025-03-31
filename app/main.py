@@ -59,7 +59,7 @@ app.add_middleware(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://virascope.by", "www.virascope.by", "http://localhost:5173", "http://localhost:5174"],  # Allow your frontend origin
+    allow_origins=["https://virascope.by", "www.virascope.by", "https://virascope.xyz", "www.virascope.xyz", "http://localhost:5173", "http://localhost:5174"],  # Allow your frontend origin
     allow_credentials=True,
     allow_methods=["*"],  # Allow all methods (GET, POST, etc.)
     allow_headers=["*"],  # Allow all headers

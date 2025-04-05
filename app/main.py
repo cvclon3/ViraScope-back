@@ -5,7 +5,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from fastapi import Depends
 from app.models.user import User
 
-from app.api import auth, favorites, search, getcomments, collections
+from app.api import auth, favorites, search, getcomments, collections, videos
 from app.api.auth import get_current_user
 
 from app.core.config import settings
@@ -71,6 +71,7 @@ app.include_router(auth.router, prefix="", tags=["auth"])
 app.include_router(favorites.router, prefix="/favorites", tags=["favorites"])
 app.include_router(collections.router, prefix="/collections", tags=["collections"])
 app.include_router(search.router, prefix="/search", tags=["search"])
+app.include_router(videos.router, prefix="/videos", tags=["info about videos and channels"])
 app.include_router(getcomments.router, prefix="/forai", tags=["for ai"])
 
 

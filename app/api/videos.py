@@ -1,279 +1,266 @@
 # app/api/videos.py
 
-from fastapi import APIRouter, Query, HTTPException, Depends # Добавляем Depends
-from typing import List, Optional, Dict
-# Убираем импорт get_youtube_client и функций ядра из app.core.youtube,
-# так как клиент получаем через зависимость, а функции вызываем напрямую
-# from app.core.youtube import (get_youtube_client, get_recent_views,
-#                               get_total_videos_on_channel, get_channel_views, parse_duration)
-from app.core.youtube import parse_duration # Оставляем только parse_duration, если он еще нужен здесь
-# Импортируем новую зависимость и тип клиента
+from fastapi import APIRouter, Depends, HTTPException, status, Body, Query # Import Query
+from typing import List, Dict, Optional
 from googleapiclient.discovery import build
-from app.api.auth import get_user_youtube_client_via_cookie
-# Импортируем функции ядра для вызова с клиентом
-from app.core.youtube import get_channel_info as core_get_channel_info
-from app.core.youtube import get_total_videos_on_channel as core_get_total_videos
-from app.core.youtube import get_channel_views as core_get_channel_views
+import logging
+import traceback
 
-from app.models.video import Video # Используем вашу модель Video
-import math
-import datetime
-import re
-from urllib.parse import quote_plus
-import traceback # Для отладки
+from app.api.auth import get_user_youtube_client_via_cookie
+from app.models.search_models import Item, SearchResponse
+from app.core.youtube import get_channel_info, parse_duration, get_total_videos_on_channel
+
+# --- Setup Logging ---
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# --- ИЗМЕНЕНИЕ: get_video_info теперь async и принимает youtube клиент ---
-async def get_video_info(youtube: build, video_id: str) -> Optional[Dict]:
+# --- Helper Function (build_item_from_video_details - remains the same) ---
+async def build_item_from_video_details(
+    youtube: build,
+    video_detail: Dict,
+    channel_cache: Dict[str, Optional[Dict]] # Cache for channel info within the request
+) -> Optional[Item]:
     """
-    Получает подробную информацию об одном видео по его ID,
-    используя предоставленный аутентифицированный клиент YouTube API.
+    Builds an Item object from YouTube video details and cached channel info.
+    Fetches channel info if not already cached.
     """
-    print(f"Fetching video info for ID: {video_id}")
-    try:
-        # --- ИЗМЕНЕНИЕ: Используем переданный youtube клиент ---
-        video_response = youtube.videos().list(
-            part='snippet,statistics,contentDetails',
-            id=video_id
-        ).execute()
+    video_id = video_detail.get('id')
+    snippet = video_detail.get('snippet', {})
+    statistics = video_detail.get('statistics', {})
+    content_details = video_detail.get('contentDetails', {})
+    channel_id = snippet.get('channelId')
 
-        if not video_response.get('items'):
-            print(f"Video not found: {video_id}")
+    if not video_id or not channel_id:
+        logger.warning(f"Skipping video due to missing video_id or channel_id. Video data: {video_detail}")
+        return None
+
+    try:
+        # --- Channel Info Handling ---
+        if channel_id not in channel_cache:
+            logger.info(f"Fetching channel info for {channel_id} (not in cache)...")
+            channel_info_dict = await get_channel_info(youtube, channel_id)
+            channel_cache[channel_id] = channel_info_dict # Cache result (even if None)
+        else:
+            logger.debug(f"Using cached channel info for {channel_id}.")
+            channel_info_dict = channel_cache[channel_id]
+
+        if not channel_info_dict:
+            logger.warning(f"Could not get channel info for {channel_id} (video_id: {video_id}). Skipping item.")
             return None
 
-        video_data = video_response['items'][0]
-        snippet = video_data.get('snippet', {})
-        statistics = video_data.get('statistics', {})
-        content_details = video_data.get('contentDetails', {})
-
-        channel_id = snippet.get('channelId')
-        if not channel_id:
-            print(f"Channel ID missing for video {video_id}")
-            return None # Не можем продолжить без ID канала
-
-        # --- ИЗМЕНЕНИЕ: Вызываем функции ядра с переданным youtube клиентом ---
-        channel_info = await core_get_channel_info(youtube, channel_id)
-        if not channel_info:
-            print(f"Could not get channel info for {channel_id} (video {video_id})")
-            # Можно решить, возвращать ли None или видео без данных канала
-            # return None
-            # Попробуем продолжить с тем, что есть
-            channel_subscribers = 0
-            total_videos = 0
-            all_channel_views = 0
-        else:
-            channel_subscribers = channel_info.get('channel_subscribers', 0)
-            # total_videos = channel_info.get('videoCount', 0) # get_channel_info возвращает videoCount
-            total_videos = core_get_total_videos(youtube, channel_id) or 0 # Можно вызвать отдельно, если нужно точно
-            all_channel_views = await core_get_channel_views(youtube, channel_id) or 0 # Получаем просмотры канала
-
+        # --- Video Stats ---
         likes = int(statistics['likeCount']) if 'likeCount' in statistics else 0
         likes_hidden = 'likeCount' not in statistics
-        views = int(statistics.get('viewCount', 0)) # Безопасное получение
+        views = int(statistics.get('viewCount', 0))
         comments = int(statistics['commentCount']) if 'commentCount' in statistics else 0
         comments_hidden = 'commentCount' not in statistics
         duration_str = content_details.get('duration')
-        duration = parse_duration(duration_str) if duration_str else 0
+        duration_seconds = parse_duration(duration_str) if duration_str else 0
 
-        average_channel_views_per_video = float(all_channel_views) / float(total_videos) if total_videos > 0 else None
-        # Проверка деления на ноль и наличия просмотров
-        combined_metric = float(views) / average_channel_views_per_video if average_channel_views_per_video and average_channel_views_per_video > 0 else None
+        # --- Channel Stats from Fetched Info ---
+        channel_views = channel_info_dict.get('viewCount', 0)
+        # Use videoCount from channel_info_dict directly
+        channel_video_count = channel_info_dict.get('videoCount', 0)
 
-        # Собираем объект Video (используя вашу модель)
-        video_info_obj = Video.model_validate({
+        # --- Combined Metric ---
+        avg_views_per_video = float(channel_views) / float(channel_video_count) if channel_video_count > 0 else 0
+        # Fallback if avg is zero (e.g., new channel) but video has views
+        if avg_views_per_video <= 0 and views > 0:
+             avg_views_per_video = float(views) # Use current video views as a rough estimate
+
+        combined_metric = float(views) / avg_views_per_video if avg_views_per_video > 0 else None
+
+        # --- Determine URL (basic video vs shorts - simple duration check) ---
+        item_type = 'shorts' if duration_seconds <= 60 else 'video' # Simple check
+        if item_type == 'video':
+            video_url = f'https://www.youtube.com/watch?v={video_id}'
+        else: # shorts
+            video_url = f'https://www.youtube.com/shorts/{video_id}'
+
+        # --- Create Item ---
+        item_obj = Item.model_validate({
             'video_id': video_id,
             'title': snippet.get('title', 'No Title'),
             'thumbnail': snippet.get('thumbnails', {}).get('high', {}).get('url', ''),
-            'published_at': snippet.get('publishedAt'), # Валидатор модели обработает строку
+            'published_at': snippet.get('publishedAt'), # Pydantic handles parsing
             'views': views,
-            'channel_title': snippet.get('channelTitle', 'Unknown Channel'),
-            'channel_url': f'https://www.youtube.com/channel/{channel_id}',
-            'channel_subscribers': channel_subscribers,
+            'channel_title': channel_info_dict.get('channel_title', 'Unknown Channel'),
+            'channel_url': channel_info_dict.get('channel_url', f'https://www.youtube.com/channel/{channel_id}'),
+            'channel_subscribers': channel_info_dict.get('channel_subscribers', 0),
+            'video_count': channel_video_count, # Total videos on channel
             'likes': likes,
             'likes_hidden': likes_hidden,
-            # Добавляем недостающие поля из вашей модели Video
             'comments': comments,
-            # 'comments_hidden': comments_hidden, # Если есть в модели
+            'comments_hidden': comments_hidden,
             'combined_metric': combined_metric,
-            'duration': duration,
-            'total_videos': total_videos,
-            'video_url': f'https://www.youtube.com/watch?v={video_id}',
+            'duration': duration_seconds,
+            'video_url': video_url,
+            'channel_thumbnail': channel_info_dict.get('channel_thumbnail', ''),
         })
-        print(f"Successfully fetched info for video: {video_id}")
-        return video_info_obj.model_dump() # Возвращаем как словарь
+        logger.debug(f"Successfully built item for video_id: {video_id}")
+        return item_obj
 
+    except KeyError as e:
+        logger.error(f"KeyError building item for video ID {video_id}: Missing key {e}", exc_info=True)
+        return None
     except Exception as e:
-        print(f"Error in get_video_info for video ID {video_id}: {e}")
-        # Проверяем на ошибки квоты или авторизации
-        if 'HttpError 403' in str(e) and 'quotaExceeded' in str(e):
-             print(f"Quota exceeded for user while fetching info for video {video_id}.")
-             # Можно выбросить HTTPException(status_code=429, ...) или вернуть None
-        elif 'HttpError 401' in str(e) or ('HttpError 403' in str(e) and 'forbidden' in str(e).lower()):
-             print(f"Authorization error fetching info for video {video_id}.")
-             # Можно выбросить HTTPException(status_code=401, ...) или вернуть None
-        else:
-             # Логгируем неожиданную ошибку
-             traceback.print_exc()
-        return None # Возвращаем None при любой ошибке
+        logger.error(f"Unexpected error building item for video ID {video_id}: {e}", exc_info=True)
+        return None
 
-# --- Функции get_channel_info, get_channel_views, parse_duration УДАЛЕНЫ ОТСЮДА ---
-# --- Они теперь в app.core.youtube и вызываются как core_get_... ---
 
-@router.get("/", response_model=List[Video])
-async def get_videos_by_title(
-    query: str = Query(..., description="Поисковый запрос (название видео)"),
-    max_results: int = Query(10, description="Максимальное количество результатов", ge=1, le=50),
-    min_combined_metric: Optional[float] = Query(None, description="Минимальное значение combined_metric"),
-    max_combined_metric: Optional[float] = Query(None, description="Максимальное значение combined_metric"),
-    min_views: Optional[int] = Query(None, description="Минимальное количество просмотров"),
-    max_views: Optional[int] = Query(None, description="Максимальное количество просмотров"),
-    min_channel_subscribers: Optional[int] = Query(None, description="Минимальное количество подписчиков канала"),
-    max_channel_subscribers: Optional[int] = Query(None, description="Максимальное количество подписчиков канала"),
-    min_duration: Optional[int] = Query(None, description="Минимальная длительность видео (в секундах)"),
-    max_duration: Optional[int] = Query(None, description="Максимальная длительность видео (в секундах)"),
-    min_comments: Optional[int] = Query(None, description="Минимальное количество комментариев"),
-    max_comments: Optional[int] = Query(None, description="Максимальное количество комментариев"),
-    min_total_videos: Optional[int] = Query(None, description="Минимальное количество видео на канале"),
-    max_total_videos: Optional[int] = Query(None, description="Максимальное количество видео на канале"),
-    published_date: Optional[str] = Query(None, description="Дата публикации (all_time, last_week, last_month, last_3_months, last_6_months, last_year)"),
-    video_type: Optional[str] = Query("any", description="Тип видео (any, video, shorts)"),
-    # --- ИЗМЕНЕНИЕ: Добавляем зависимость для получения клиента YouTube ---
+# --- Endpoint 1: Get Info by Video IDs (remains the same) ---
+@router.post("/videos_by_ids", response_model=SearchResponse, tags=["info"])
+async def get_videos_by_ids(
+    video_ids: List[str] = Body(..., embed=True, description="A list of YouTube video IDs (max 50)."),
     youtube: build = Depends(get_user_youtube_client_via_cookie)
 ):
     """
-    Эндпоинт для поиска видео с фильтрацией. Использует аутентификацию пользователя.
+    Retrieves detailed information for a list of specified video IDs.
+    Response structure matches the `/search/videos` endpoint.
+    Requires authentication.
     """
-    print(f"Received filtered video search: query='{query}', max_results={max_results}, filters='...'")
+    if not video_ids:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Video ID list cannot be empty.")
+    if len(video_ids) > 50:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Maximum of 50 video IDs allowed per request.")
+
+    logger.info(f"Request received for video IDs: {video_ids}")
+    unique_video_ids = list(set(video_ids)) # Ensure unique IDs
+    ids_string = ','.join(unique_video_ids)
+
+    results: List[Item] = []
+    channel_info_cache: Dict[str, Optional[Dict]] = {} # Cache channel info during this request
+
     try:
-        # --- ИЗМЕНЕНИЕ: Используем переданный youtube клиент ---
-        encoded_query = quote_plus(query) # Используем quote_plus для URL encoding
+        # --- Fetch Video Details ---
+        logger.info(f"Calling YouTube API: videos().list for IDs: {ids_string}")
+        video_response = youtube.videos().list(
+            part="snippet,contentDetails,statistics",
+            id=ids_string,
+            maxResults=len(unique_video_ids)
+        ).execute()
 
-        videos = []
-        next_page_token = None
-        retrieved_count = 0
-        # Ограничения на выполнение, чтобы избежать слишком долгих запросов
-        max_pages_search = 5 # Максимум страниц поиска YouTube
-        max_total_fetch = 100 # Максимум видео, для которых будем запрашивать детали
-        fetched_details_count = 0
-        start_time = datetime.datetime.now(datetime.timezone.utc)
-        max_execution_time_sec = 30
+        video_items = video_response.get('items', [])
+        logger.info(f"Received details for {len(video_items)} videos from API.")
 
-        for page_num in range(max_pages_search):
-            if fetched_details_count >= max_total_fetch:
-                print("Reached max total fetch limit.")
-                break
-            if (datetime.datetime.now(datetime.timezone.utc) - start_time).total_seconds() > max_execution_time_sec:
-                 print("Reached max execution time.")
-                 break
+        if not video_items:
+             # Return empty list if none of the IDs were valid or found
+             return SearchResponse(item_count=0, type='videos', items=[])
 
-            print(f"Searching page {page_num + 1} with token: {next_page_token}")
-            try:
-                 search_response = youtube.search().list(
-                     q=encoded_query,
-                     part='snippet',
-                     type='video',
-                     maxResults=min(50, max_total_fetch - fetched_details_count), # Запрашиваем до 50 или оставшееся до лимита
-                     pageToken=next_page_token
-                 ).execute()
-            except Exception as e:
-                 print(f"Error during youtube.search().list (page {page_num + 1}): {e}")
-                 if 'quotaExceeded' in str(e):
-                      raise HTTPException(status_code=429, detail="YouTube API quota exceeded for user.")
-                 elif 'forbidden' in str(e).lower() or 'authorization' in str(e).lower():
-                      raise HTTPException(status_code=403, detail="YouTube API authorization error. Please re-login.")
-                 else:
-                      traceback.print_exc()
-                      # Прерываем поиск при ошибке API
-                      break
+        # --- Process Each Video ---
+        for video_detail in video_items:
+             item = await build_item_from_video_details(youtube, video_detail, channel_info_cache)
+             if item:
+                 results.append(item)
 
+        logger.info(f"Successfully processed {len(results)} videos.")
 
-            search_items = search_response.get('items', [])
-            next_page_token = search_response.get('nextPageToken')
-            print(f"Found {len(search_items)} items on page {page_num + 1}.")
-
-            if not search_items:
-                break # Больше нет результатов поиска
-
-            for search_result in search_items:
-                 if fetched_details_count >= max_total_fetch: break # Проверка лимита
-                 if (datetime.datetime.now(datetime.timezone.utc) - start_time).total_seconds() > max_execution_time_sec: break # Проверка времени
-
-                 video_id = search_result.get('id', {}).get('videoId')
-                 if not video_id:
-                     continue
-
-                 fetched_details_count += 1
-                 # --- ИЗМЕНЕНИЕ: Вызываем get_video_info с youtube клиентом ---
-                 video_info = await get_video_info(youtube, video_id)
-
-                 if video_info:
-                     # --- Применяем фильтры ---
-                     should_add = True
-
-                     # Фильтр по типу видео (Shorts)
-                     # get_video_info уже вычисляет 'duration'
-                     duration = video_info.get('duration', 0)
-                     is_short = duration <= 60 # Простое определение по длительности
-
-                     if video_type == "video" and is_short:
-                         should_add = False
-                     elif video_type == "shorts" and not is_short:
-                         should_add = False
-
-                     # Остальные фильтры (применяем только если should_add еще True)
-                     if should_add and min_combined_metric is not None and (video_info.get('combined_metric') is None or video_info['combined_metric'] < min_combined_metric): should_add = False
-                     if should_add and max_combined_metric is not None and video_info.get('combined_metric') is not None and video_info['combined_metric'] > max_combined_metric: should_add = False
-                     if should_add and min_views is not None and video_info.get('views', 0) < min_views: should_add = False
-                     if should_add and max_views is not None and video_info.get('views', 0) > max_views: should_add = False
-                     if should_add and min_channel_subscribers is not None and video_info.get('channel_subscribers', 0) < min_channel_subscribers: should_add = False
-                     if should_add and max_channel_subscribers is not None and video_info.get('channel_subscribers', 0) > max_channel_subscribers: should_add = False
-                     if should_add and min_duration is not None and duration < min_duration: should_add = False
-                     if should_add and max_duration is not None and duration > max_duration: should_add = False
-                     if should_add and min_comments is not None and (video_info.get('comments') is None or video_info['comments'] < min_comments): should_add = False
-                     if should_add and max_comments is not None and video_info.get('comments') is not None and video_info['comments'] > max_comments: should_add = False
-                     if should_add and min_total_videos is not None and (video_info.get('total_videos') is None or video_info['total_videos'] < min_total_videos): should_add = False
-                     if should_add and max_total_videos is not None and video_info.get('total_videos') is not None and video_info['total_videos'] > max_total_videos: should_add = False
-
-                     # Фильтр по дате публикации
-                     if should_add and published_date and published_date != "all_time":
-                         published_at_dt = video_info.get('published_at')
-                         if published_at_dt:
-                              # published_at уже datetime объект из модели
-                              now = datetime.datetime.now(datetime.timezone.utc)
-                              delta_days = (now - published_at_dt).days
-                              if published_date == "last_week" and delta_days > 7: should_add = False
-                              elif published_date == "last_month" and delta_days > 30: should_add = False
-                              elif published_date == "last_3_months" and delta_days > 90: should_add = False
-                              elif published_date == "last_6_months" and delta_days > 180: should_add = False
-                              elif published_date == "last_year" and delta_days > 365: should_add = False
-                         else:
-                              # Если нет даты публикации, не можем применить фильтр
-                              should_add = False # Или пропускаем фильтр, зависит от логики
-
-                     # Добавляем видео, если прошло все фильтры
-                     if should_add:
-                         videos.append(video_info) # video_info уже словарь
-                         retrieved_count += 1
-                         print(f"Added video {video_id} to results. Count: {retrieved_count}")
-
-                 # Проверяем, не набрали ли уже нужное количество
-                 if retrieved_count >= max_results:
-                     break # Выход из цикла по search_items
-
-            # Проверяем выход из внешнего цикла (по страницам)
-            if retrieved_count >= max_results or not next_page_token:
-                break
-
-        print(f"Finished search. Total videos matching criteria: {retrieved_count}")
-        # Возвращаем не более max_results
-        # Модель Video ожидает объекты, поэтому валидируем перед возвратом
-        return [Video.model_validate(v) for v in videos[:max_results]]
+        return SearchResponse(item_count=len(results), type='videos', items=results)
 
     except HTTPException as he:
-         print(f"HTTP Exception in get_videos_by_title: {he.status_code} - {he.detail}")
-         raise he # Пробрасываем HTTP исключения (например, 429, 403)
+        # Re-raise HTTP exceptions from dependencies or helpers
+        raise he
     except Exception as e:
-        print(f"Unexpected error in get_videos_by_title endpoint: {e}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Internal server error during video search: {e}")
+        logger.error(f"Error fetching videos by IDs: {e}", exc_info=True)
+        if 'HttpError 403' in str(e) and 'quotaExceeded' in str(e):
+             raise HTTPException(status_code=429, detail="YouTube API quota exceeded for user.")
+        elif 'HttpError 401' in str(e) or 'HttpError 403' in str(e):
+             raise HTTPException(status_code=401, detail="YouTube API authorization error. Please re-login.")
+        else:
+             raise HTTPException(status_code=500, detail=f"Internal server error fetching video details: {e}")
+
+
+# --- Endpoint 2: Get Latest Videos by Channel ID (Query Parameter) ---
+# --- CHANGE: Path changed, channel_id moved to Query parameter ---
+@router.get("/channel_latest_videos", response_model=SearchResponse, tags=["info"])
+async def get_channel_latest_videos(
+    # --- CHANGE: channel_id is now a query parameter ---
+    channel_id: str = Query(..., description="The YouTube channel ID."),
+    youtube: build = Depends(get_user_youtube_client_via_cookie)
+):
+    """
+    Retrieves the 6 most recent videos from the specified channel ID (provided as a query parameter).
+    Response structure matches the `/search/videos` endpoint.
+    Requires authentication.
+    """
+    # --- CHANGE: Logging reflects query parameter usage ---
+    logger.info(f"Request received for latest 6 videos from channel ID (query param): {channel_id}")
+
+    results: List[Item] = []
+    channel_info_cache: Dict[str, Optional[Dict]] = {} # Cache for this request
+
+    try:
+        # --- Step 1: Search for the latest 6 videos ---
+        logger.info(f"Calling YouTube API: search().list for channel {channel_id}")
+        search_response = youtube.search().list(
+            part='snippet',
+            channelId=channel_id,
+            order='date', # Order by date (most recent first)
+            type='video', # Ensure we get videos
+            maxResults=6
+        ).execute()
+
+        search_items = search_response.get('items', [])
+        logger.info(f"Found {len(search_items)} potential latest videos via search.")
+
+        if not search_items:
+            logger.info(f"No videos found for channel {channel_id}.")
+            return SearchResponse(item_count=0, type='videos', items=[])
+
+        video_ids = [item['id']['videoId'] for item in search_items if item.get('id', {}).get('videoId')]
+
+        if not video_ids:
+             logger.warning(f"Search results found, but no video IDs extracted for channel {channel_id}.")
+             return SearchResponse(item_count=0, type='videos', items=[])
+
+        ids_string = ','.join(video_ids)
+
+        # --- Step 2: Get details for these specific videos ---
+        logger.info(f"Calling YouTube API: videos().list for latest video IDs: {ids_string}")
+        video_response = youtube.videos().list(
+            part="snippet,contentDetails,statistics",
+            id=ids_string,
+            maxResults=len(video_ids)
+        ).execute()
+
+        video_items = video_response.get('items', [])
+        logger.info(f"Received details for {len(video_items)} latest videos from API.")
+
+        if not video_items:
+             logger.warning(f"Could not get details for the found video IDs: {ids_string}")
+             return SearchResponse(item_count=0, type='videos', items=[])
+
+        # --- Step 3: Process Each Video (using a pre-fetched channel info) ---
+        # Fetch channel info ONCE using the input channel_id
+        channel_info_dict = await get_channel_info(youtube, channel_id)
+        if not channel_info_dict:
+             logger.error(f"Failed to get channel info for the primary channel ID: {channel_id}. Cannot proceed.")
+             raise HTTPException(status_code=404, detail=f"Channel info not found for ID: {channel_id}")
+
+        channel_info_cache[channel_id] = channel_info_dict # Pre-populate cache
+
+        for video_detail in video_items:
+            item = await build_item_from_video_details(youtube, video_detail, channel_info_cache)
+            if item:
+                results.append(item)
+
+        logger.info(f"Successfully processed {len(results)} latest videos for channel {channel_id}.")
+
+        return SearchResponse(item_count=len(results), type='videos', items=results)
+
+    except HTTPException as he:
+        # Re-raise HTTP exceptions
+        raise he
+    except Exception as e:
+        logger.error(f"Error fetching latest channel videos for {channel_id}: {e}", exc_info=True)
+        # Error handling remains largely the same, but messages reflect it's a query param issue if relevant
+        if 'HttpError 404' in str(e) and 'channelNotFound' in str(e):
+             raise HTTPException(status_code=404, detail=f"Channel not found for ID provided in query: {channel_id}")
+        elif 'HttpError 403' in str(e) and 'quotaExceeded' in str(e):
+             raise HTTPException(status_code=429, detail="YouTube API quota exceeded for user.")
+        elif 'HttpError 401' in str(e) or 'HttpError 403' in str(e):
+             raise HTTPException(status_code=401, detail="YouTube API authorization error. Please re-login.")
+        else:
+             raise HTTPException(status_code=500, detail=f"Internal server error fetching latest channel videos: {e}")

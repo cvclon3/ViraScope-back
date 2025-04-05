@@ -261,7 +261,7 @@ async def search_videos(
     videos_result = []
     next_page_token = None
     total_results_estimate = 0 # Примерное общее количество
-    max_pages_to_fetch = 5 # Ограничение на количество страниц для предотвращения долгого выполнения
+    max_pages_to_fetch = 1 # Ограничение на количество страниц для предотвращения долгого выполнения
 
     try:
         for page_num in range(max_pages_to_fetch):
@@ -326,7 +326,7 @@ async def search_shorts(
     shorts_result = []
     next_page_token = None
     total_results_estimate = 0
-    max_pages_to_fetch = 5 # Ограничение
+    max_pages_to_fetch = 1 # Ограничение
 
     try:
         for page_num in range(max_pages_to_fetch):

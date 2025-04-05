@@ -174,7 +174,7 @@ async def get_videos_by_ids(
 
 # --- Endpoint 2: Get Latest Videos by Channel ID (Query Parameter) ---
 # --- CHANGE: Path changed, channel_id moved to Query parameter ---
-# @router.get("/channel_latest_videos", response_model=SearchResponse, tags=["info"])
+# @router.get("/c", response_model=SearchResponse, tags=["info"])
 # async def get_channel_latest_videos(
 #     # --- CHANGE: channel_id is now a query parameter ---
 #     channel_id: str = Query(..., description="The YouTube channel ID."),

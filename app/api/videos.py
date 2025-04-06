@@ -112,7 +112,7 @@ async def build_item_from_video_details(
 
 
 # --- Endpoint 1: Get Info by Video IDs (remains the same) ---
-@router.post("/videos_by_ids", response_model=SearchResponse, tags=["info"])
+@router.post("/videos_by_ids", response_model=SearchResponse)
 async def get_videos_by_ids(
     video_ids: List[str] = Body(..., embed=True, description="A list of YouTube video IDs (max 50)."),
     youtube: build = Depends(get_user_youtube_client_via_cookie)
@@ -175,7 +175,7 @@ async def get_videos_by_ids(
 
 # --- Endpoint 2: Get Latest Videos by Channel ID (Query Parameter) ---
 # --- CHANGE: Path changed, channel_id moved to Query parameter ---
-@router.get("/channel_latest_videos", response_model=SearchResponse, tags=["info"])
+@router.get("/channel_latest_videos", response_model=SearchResponse)
 async def get_channel_latest_videos(
     # --- CHANGE: channel_id is now a query parameter ---
     channel_id: str = Query(..., description="The YouTube channel ID."),

@@ -9,6 +9,7 @@ import traceback
 from app.api.auth import get_user_youtube_client_via_cookie
 from app.models.search_models import Item, SearchResponse
 from app.core.youtube import get_channel_info, parse_duration, get_total_videos_on_channel
+from app.core.config import settings
 
 # --- Setup Logging ---
 logging.basicConfig(level=logging.INFO)
@@ -174,93 +175,93 @@ async def get_videos_by_ids(
 
 # --- Endpoint 2: Get Latest Videos by Channel ID (Query Parameter) ---
 # --- CHANGE: Path changed, channel_id moved to Query parameter ---
-# @router.get("/c", response_model=SearchResponse, tags=["info"])
-# async def get_channel_latest_videos(
-#     # --- CHANGE: channel_id is now a query parameter ---
-#     channel_id: str = Query(..., description="The YouTube channel ID."),
-#     youtube: build = Depends(get_user_youtube_client_via_cookie)
-# ):
-#     """
-#     Retrieves the 6 most recent videos from the specified channel ID (provided as a query parameter).
-#     Response structure matches the `/search/videos` endpoint.
-#     Requires authentication.
-#     """
-#     # --- CHANGE: Logging reflects query parameter usage ---
-#     logger.info(f"Request received for latest 6 videos from channel ID (query param): {channel_id}")
-#
-#     results: List[Item] = []
-#     channel_info_cache: Dict[str, Optional[Dict]] = {} # Cache for this request
-#
-#     try:
-#         # --- Step 1: Search for the latest 6 videos ---
-#         logger.info(f"Calling YouTube API: search().list for channel {channel_id}")
-#         search_response = youtube.search().list(
-#             part='snippet',
-#             channelId=channel_id,
-#             order='date', # Order by date (most recent first)
-#             type='video', # Ensure we get videos
-#             maxResults=6
-#         ).execute()
-#
-#         search_items = search_response.get('items', [])
-#         logger.info(f"Found {len(search_items)} potential latest videos via search.")
-#
-#         if not search_items:
-#             logger.info(f"No videos found for channel {channel_id}.")
-#             return SearchResponse(item_count=0, type='videos', items=[])
-#
-#         video_ids = [item['id']['videoId'] for item in search_items if item.get('id', {}).get('videoId')]
-#
-#         if not video_ids:
-#              logger.warning(f"Search results found, but no video IDs extracted for channel {channel_id}.")
-#              return SearchResponse(item_count=0, type='videos', items=[])
-#
-#         ids_string = ','.join(video_ids)
-#
-#         # --- Step 2: Get details for these specific videos ---
-#         logger.info(f"Calling YouTube API: videos().list for latest video IDs: {ids_string}")
-#         video_response = youtube.videos().list(
-#             part="snippet,contentDetails,statistics",
-#             id=ids_string,
-#             maxResults=len(video_ids)
-#         ).execute()
-#
-#         video_items = video_response.get('items', [])
-#         logger.info(f"Received details for {len(video_items)} latest videos from API.")
-#
-#         if not video_items:
-#              logger.warning(f"Could not get details for the found video IDs: {ids_string}")
-#              return SearchResponse(item_count=0, type='videos', items=[])
-#
-#         # --- Step 3: Process Each Video (using a pre-fetched channel info) ---
-#         # Fetch channel info ONCE using the input channel_id
-#         channel_info_dict = await get_channel_info(youtube, channel_id)
-#         if not channel_info_dict:
-#              logger.error(f"Failed to get channel info for the primary channel ID: {channel_id}. Cannot proceed.")
-#              raise HTTPException(status_code=404, detail=f"Channel info not found for ID: {channel_id}")
-#
-#         channel_info_cache[channel_id] = channel_info_dict # Pre-populate cache
-#
-#         for video_detail in video_items:
-#             item = await build_item_from_video_details(youtube, video_detail, channel_info_cache)
-#             if item:
-#                 results.append(item)
-#
-#         logger.info(f"Successfully processed {len(results)} latest videos for channel {channel_id}.")
-#
-#         return SearchResponse(item_count=len(results), type='videos', items=results)
-#
-#     except HTTPException as he:
-#         # Re-raise HTTP exceptions
-#         raise he
-#     except Exception as e:
-#         logger.error(f"Error fetching latest channel videos for {channel_id}: {e}", exc_info=True)
-#         # Error handling remains largely the same, but messages reflect it's a query param issue if relevant
-#         if 'HttpError 404' in str(e) and 'channelNotFound' in str(e):
-#              raise HTTPException(status_code=404, detail=f"Channel not found for ID provided in query: {channel_id}")
-#         elif 'HttpError 403' in str(e) and 'quotaExceeded' in str(e):
-#              raise HTTPException(status_code=429, detail="YouTube API quota exceeded for user.")
-#         elif 'HttpError 401' in str(e) or 'HttpError 403' in str(e):
-#              raise HTTPException(status_code=401, detail="YouTube API authorization error. Please re-login.")
-#         else:
-#              raise HTTPException(status_code=500, detail=f"Internal server error fetching latest channel videos: {e}")
+@router.get("/channel_latest_videos", response_model=SearchResponse, tags=["info"])
+async def get_channel_latest_videos(
+    # --- CHANGE: channel_id is now a query parameter ---
+    channel_id: str = Query(..., description="The YouTube channel ID."),
+    youtube: build = Depends(get_user_youtube_client_via_cookie),
+):
+    """
+    Retrieves the 6 most recent videos from the specified channel ID (provided as a query parameter).
+    Response structure matches the `/search/videos` endpoint.
+    Requires authentication.
+    """
+    # --- CHANGE: Logging reflects query parameter usage ---
+    logger.info(f"Request received for latest 6 videos from channel ID (query param): {channel_id}")
+
+    results: List[Item] = []
+    channel_info_cache: Dict[str, Optional[Dict]] = {} # Cache for this request
+
+    try:
+        # --- Step 1: Search for the latest 6 videos ---
+        logger.info(f"Calling YouTube API: search().list for channel {channel_id}")
+        search_response = youtube.search().list(
+            part='snippet',
+            channelId=channel_id,
+            order='date', # Order by date (most recent first)
+            type='video', # Ensure we get videos
+            maxResults=6
+        ).execute()
+
+        search_items = search_response.get('items', [])
+        logger.info(f"Found {len(search_items)} potential latest videos via search.")
+
+        if not search_items:
+            logger.info(f"No videos found for channel {channel_id}.")
+            return SearchResponse(item_count=0, type='videos', items=[])
+
+        video_ids = [item['id']['videoId'] for item in search_items if item.get('id', {}).get('videoId')]
+
+        if not video_ids:
+             logger.warning(f"Search results found, but no video IDs extracted for channel {channel_id}.")
+             return SearchResponse(item_count=0, type='videos', items=[])
+
+        ids_string = ','.join(video_ids)
+
+        # --- Step 2: Get details for these specific videos ---
+        logger.info(f"Calling YouTube API: videos().list for latest video IDs: {ids_string}")
+        video_response = youtube.videos().list(
+            part="snippet,contentDetails,statistics",
+            id=ids_string,
+            maxResults=len(video_ids)
+        ).execute()
+
+        video_items = video_response.get('items', [])
+        logger.info(f"Received details for {len(video_items)} latest videos from API.")
+
+        if not video_items:
+             logger.warning(f"Could not get details for the found video IDs: {ids_string}")
+             return SearchResponse(item_count=0, type='videos', items=[])
+
+        # --- Step 3: Process Each Video (using a pre-fetched channel info) ---
+        # Fetch channel info ONCE using the input channel_id
+        channel_info_dict = await get_channel_info(youtube, channel_id)
+        if not channel_info_dict:
+             logger.error(f"Failed to get channel info for the primary channel ID: {channel_id}. Cannot proceed.")
+             raise HTTPException(status_code=404, detail=f"Channel info not found for ID: {channel_id}")
+
+        channel_info_cache[channel_id] = channel_info_dict # Pre-populate cache
+
+        for video_detail in video_items:
+            item = await build_item_from_video_details(youtube, video_detail, channel_info_cache)
+            if item:
+                results.append(item)
+
+        logger.info(f"Successfully processed {len(results)} latest videos for channel {channel_id}.")
+
+        return SearchResponse(item_count=len(results), type='videos', items=results)
+
+    except HTTPException as he:
+        # Re-raise HTTP exceptions
+        raise he
+    except Exception as e:
+        logger.error(f"Error fetching latest channel videos for {channel_id}: {e}", exc_info=True)
+        # Error handling remains largely the same, but messages reflect it's a query param issue if relevant
+        if 'HttpError 404' in str(e) and 'channelNotFound' in str(e):
+             raise HTTPException(status_code=404, detail=f"Channel not found for ID provided in query: {channel_id}")
+        elif 'HttpError 403' in str(e) and 'quotaExceeded' in str(e):
+             raise HTTPException(status_code=429, detail="YouTube API quota exceeded for user.")
+        elif 'HttpError 401' in str(e) or 'HttpError 403' in str(e):
+             raise HTTPException(status_code=401, detail="YouTube API authorization error. Please re-login.")
+        else:
+             raise HTTPException(status_code=500, detail=f"Internal server error fetching latest channel videos: {e}")

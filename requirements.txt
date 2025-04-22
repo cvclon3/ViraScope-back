@@ -17,6 +17,6 @@ httpx~=0.28.1
 authlib~=1.5.1
 itsdangerous~=2.2.0
 bcrypt~=4.3.0
-
+redis~=5.2.1
 starlette~=0.46.1
 protobuf~=6.30.1
